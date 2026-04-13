@@ -1,0 +1,11 @@
+{
+  "name": "smart-weight-system",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "weight-service",
+    "print-service",
+    "sync-service",
+    "web-ui"
+  ]
+}
