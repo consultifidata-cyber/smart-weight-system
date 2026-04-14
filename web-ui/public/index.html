@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Smart Weight System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="app" x-data="weightApp()" x-init="init()" @unload.window="destroy()">
+
+    <!-- Error Banner -->
+    <div class="error-banner" x-show="errorMessage" x-text="errorMessage" x-transition></div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <div class="status-item">
+        <strong x-text="'Station: ' + CONFIG.stationId"></strong>
+      </div>
+      <div class="status-item">
+        <span class="status-dot" :class="weightStatus === 'ok' ? 'connected' : 'disconnected'"></span>
+        Scale
+      </div>
+      <div class="status-item">
+        <span class="status-dot" :class="printerConnected ? 'connected' : 'disconnected'"></span>
+        Printer
+      </div>
+    </div>
+
+    <!-- Weight Display -->
+    <div class="weight-card" :class="weightColorClass">
+      <div>
+        <span class="weight-value" x-text="weightDisplay"></span>
+        <span class="weight-unit" x-text="unit"></span>
+      </div>
+      <div class="weight-status" x-text="weightLabel"></div>
+    </div>
+
+    <!-- Product Dropdown -->
+    <div class="select-wrapper">
+      <select class="product-select" x-model="selectedProduct" @change="selectProduct()">
+        <option value="">-- Select Product --</option>
+        <template x-for="p in products" :key="p.name">
+          <option :value="p.name" x-text="p.name"></option>
+        </template>
+      </select>
+      <span class="select-arrow">&#9662;</span>
+    </div>
+
+    <!-- Spacer pushes button to bottom -->
+    <div class="spacer"></div>
+
+    <!-- Print Button -->
+    <button
+      class="print-btn"
+      :class="{
+        printing: state === 'PRINTING',
+        success: state === 'SUCCESS',
+        error: state === 'ERROR'
+      }"
+      :disabled="printButtonDisabled"
+      @click="doPrint()"
+      x-text="printButtonText"
+    ></button>
+
+  </div>
+
+  <script src="lib/alpine.min.js" defer></script>
+  <script src="config.js"></script>
+  <script src="counter.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "@smart-weight/print-service",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "test": "tsx --test 'test/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "test-print": "tsx scripts/test-print.ts"
+  },
+  "dependencies": {
+    "express": "^5.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "pino": "^8.20.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "tsx": "^4.9.3",
+    "@types/node": "^20.12.7",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "pino-pretty": "^10.3.1",
+    "supertest": "^6.3.4",
+    "@types/supertest": "^6.0.2"
+  }
+}
