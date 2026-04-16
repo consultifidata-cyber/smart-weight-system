@@ -1,22 +1,18 @@
 import { config as dotenvConfig } from 'dotenv';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { resolve } from 'path';
 import type { AppConfig } from './types.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-// Load .env from project root (smart-weight-system/)
-dotenvConfig({ path: resolve(__dirname, '../../.env') });
+// Load global .env -- PM2 sets DOTENV_PATH to the absolute path;
+// fallback resolves from cwd (service dir) up one level to project root.
+dotenvConfig({ path: process.env.DOTENV_PATH || resolve(process.cwd(), '..', '.env') });
 
 const simulate = process.env.SIMULATE_SERIAL === 'true';
-
-console.log(process.env.platform);
 
 const config: AppConfig = Object.freeze({
   stationId: process.env.STATION_ID || 'ST01',
 
   serial: Object.freeze({
-    port: 'COM4',
+    port: process.env.SERIAL_PORT || 'COM3',
     baudRate: parseInt(process.env.SERIAL_BAUD_RATE!, 10) || 9600,
     dataBits: parseInt(process.env.SERIAL_DATA_BITS!, 10) || 8,
     parity: process.env.SERIAL_PARITY || 'none',

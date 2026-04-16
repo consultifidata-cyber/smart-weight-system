@@ -2,10 +2,12 @@ import { config as dotenvConfig } from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
+// __dirname is still needed for the default DB_PATH resolution below.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Load .env from project root
-dotenvConfig({ path: resolve(__dirname, '../../.env') });
+// Load global .env -- PM2 sets DOTENV_PATH to the absolute path;
+// fallback resolves from cwd (service dir) up one level to project root.
+dotenvConfig({ path: process.env.DOTENV_PATH || resolve(process.cwd(), '..', '.env') });
 
 export interface SyncServiceConfig {
   stationId: string;
@@ -37,7 +39,7 @@ const config: SyncServiceConfig = Object.freeze({
   dbPath: process.env.DB_PATH || resolve(__dirname, '../data/fg_production.db'),
 
   djangoServerUrl: process.env.DJANGO_SERVER_URL || 'http://127.0.0.1:8000',
-  djangoApiToken: process.env.DJANGO_API_TOKEN || '5b6adcee11d92c2d24144253644458527a61c5a954ffd355e11484597fe7d326',
+  djangoApiToken: process.env.DJANGO_API_TOKEN || '',
 
   bagSyncIntervalMs: parseInt(process.env.BAG_SYNC_INTERVAL_MS || '10000', 10),
   syncRetryIntervalMs: parseInt(process.env.SYNC_RETRY_INTERVAL_MS || '60000', 10),

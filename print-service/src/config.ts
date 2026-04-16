@@ -1,12 +1,10 @@
 import { config as dotenvConfig } from 'dotenv';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { resolve } from 'path';
 import type { PrinterConfig } from './types.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-// Load .env from project root
-dotenvConfig({ path: resolve(__dirname, '../../.env') });
+// Load global .env -- PM2 sets DOTENV_PATH to the absolute path;
+// fallback resolves from cwd (service dir) up one level to project root.
+dotenvConfig({ path: process.env.DOTENV_PATH || resolve(process.cwd(), '..', '.env') });
 
 const config: PrinterConfig = Object.freeze({
   driver: process.env.PRINTER_DRIVER || 'tspl',

@@ -92,7 +92,31 @@ Install these on the station computer. Download links below.
    ```
    Both commands should print version numbers.
 
-### 3.2 Git
+### 3.2 Python (3.11 or 3.12)
+
+Required for compiling the `better-sqlite3` native addon on Windows.
+
+1. Download from https://www.python.org/downloads/ (3.11 or 3.12 recommended)
+2. Run the installer
+3. **Important**: Check the box **"Add python.exe to PATH"** on the first screen -- this is critical
+4. Verify: open a **new** Command Prompt and run:
+   ```
+   python --version
+   ```
+   Should print `Python 3.11.x` or `Python 3.12.x`.
+
+> **Note:** If `python --version` opens the Microsoft Store instead of printing a version, Python is not actually installed -- the Windows Store stub is intercepting the command. Install Python from the link above.
+
+### 3.3 Visual Studio Build Tools (C++ compiler)
+
+Required for compiling native Node.js addons (`better-sqlite3`, `serialport`).
+
+1. Download **"Build Tools for Visual Studio 2022"** from https://visualstudio.microsoft.com/visual-cpp-build-tools/
+2. In the Visual Studio Installer, select the **"Desktop development with C++"** workload
+3. Click Install (this downloads ~2 GB and takes a few minutes)
+4. No restart is required, but close and reopen any open terminals after installation
+
+### 3.4 Git
 
 1. Download from https://git-scm.com/download/win
 2. Run the installer with default options
@@ -101,9 +125,9 @@ Install these on the station computer. Download links below.
    git --version
    ```
 
-### 3.3 Restart the Computer
+### 3.5 Restart the Computer
 
-After installing Node.js and Git, **restart the computer** to ensure PATH updates take effect.
+After installing all prerequisites, **restart the computer** to ensure PATH updates take effect.
 
 ---
 
@@ -311,6 +335,20 @@ pm2 restart all
    - Right-click on desktop → New → Shortcut
    - Target: `C:\smart-weight-system\deploy\start-all.bat`
    - Move the shortcut to the Startup folder
+
+### `npm install` fails with `gyp ERR! find Python`
+
+This means `better-sqlite3` (a native C++ addon) could not find Python or the C++ compiler to build from source.
+
+1. Verify Python is installed and on PATH: `python --version`
+   - If it opens the Microsoft Store, Python is **not** installed (see Section 3.2)
+2. Verify VS Build Tools are installed:
+   - Open "Visual Studio Installer" from the Start menu
+   - Confirm the "Desktop development with C++" workload is checked
+3. After installing both, **close and reopen** the terminal, then re-run:
+   ```
+   npm install
+   ```
 
 ### Port already in use
 

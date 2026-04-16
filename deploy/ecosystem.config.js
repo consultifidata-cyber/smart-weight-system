@@ -6,8 +6,10 @@
  *   pm2 start deploy/ecosystem.config.js
  *   pm2 save
  *
- * Env vars are loaded from ../.env by each service's own config.ts (via dotenv).
- * The cwd for each service is set relative to this config file's location.
+ * Each service loads env vars from the root .env via dotenv.
+ * PM2 passes the absolute path as DOTENV_PATH so services don't need
+ * to guess the .env location from import.meta.url (which is unreliable
+ * under tsx.cmd on Windows).
  *
  * tsx is hoisted to root node_modules by npm workspaces, so we use an absolute
  * path as the interpreter. On Windows we need tsx.cmd (batch wrapper), on
@@ -18,6 +20,13 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 const isWin = process.platform === 'win32';
 const tsxBin = path.join(root, 'node_modules', '.bin', isWin ? 'tsx.cmd' : 'tsx');
+const dotenvPath = path.join(root, '.env');
+
+// Shared env block -- every service gets the absolute .env path
+const sharedEnv = {
+  NODE_ENV: 'production',
+  DOTENV_PATH: dotenvPath,
+};
 
 module.exports = {
   apps: [
@@ -26,9 +35,7 @@ module.exports = {
       script: 'src/index.ts',
       cwd: path.join(root, 'weight-service'),
       interpreter: tsxBin,
-      env: {
-        NODE_ENV: 'production',
-      },
+      env: sharedEnv,
       max_restarts: 50,
       min_uptime: '5s',
       restart_delay: 3000,
@@ -45,9 +52,7 @@ module.exports = {
       script: 'src/index.ts',
       cwd: path.join(root, 'print-service'),
       interpreter: tsxBin,
-      env: {
-        NODE_ENV: 'production',
-      },
+      env: sharedEnv,
       max_restarts: 50,
       min_uptime: '5s',
       restart_delay: 3000,
@@ -64,9 +69,7 @@ module.exports = {
       script: 'src/index.ts',
       cwd: path.join(root, 'sync-service'),
       interpreter: tsxBin,
-      env: {
-        NODE_ENV: 'production',
-      },
+      env: sharedEnv,
       max_restarts: 50,
       min_uptime: '5s',
       restart_delay: 3000,
@@ -83,10 +86,7 @@ module.exports = {
       script: 'server.js',
       cwd: path.join(root, 'web-ui'),
       interpreter: 'node',
-      env: {
-        NODE_ENV: 'production',
-        WEB_UI_PORT: 3000,
-      },
+      env: sharedEnv,
       max_restarts: 50,
       min_uptime: '5s',
       restart_delay: 3000,

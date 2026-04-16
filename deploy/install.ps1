@@ -222,9 +222,18 @@ Write-Step "6/9" "Starting services via PM2"
 
 $ecosystemFile = Join-Path $repoRoot "deploy\ecosystem.config.js"
 
-# Remove only this project's services (leave other PM2 processes untouched)
-foreach ($svc in @('weight-service','print-service','sync-service','web-ui')) {
-    pm2 delete $svc 2>$null
+# If any of our services are already registered in PM2, remove them first
+# so the ecosystem config is loaded fresh. Skip on first-time install.
+$pm2List = (pm2 jlist 2>&1) | Out-String
+$ourServices = @('weight-service','print-service','sync-service','web-ui')
+foreach ($svc in $ourServices) {
+    if ($pm2List -match "`"name`":\s*`"$svc`"") {
+        Write-Host "  Removing existing PM2 process: $svc" -ForegroundColor DarkGray
+        $savedEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        pm2 delete $svc 2>&1 | Out-Null
+        $ErrorActionPreference = $savedEAP
+    }
 }
 
 pm2 start $ecosystemFile
