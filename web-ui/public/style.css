@@ -107,27 +107,6 @@ html, body {
   letter-spacing: 0.05em;
 }
 
-.end-shift-btn {
-  padding: 6px 14px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border: 2px solid var(--color-text-light);
-  border-radius: 8px;
-  background: white;
-  color: var(--color-text-light);
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.end-shift-btn:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-.end-shift-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 /* ── Weight Display ── */
 
 .weight-card {

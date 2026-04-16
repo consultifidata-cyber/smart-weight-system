@@ -323,34 +323,6 @@ function weightApp() {
     },
 
     // ══════════════════════════════════════════════════════════════
-    // End Shift (manual flush — optional)
-    // ══════════════════════════════════════════════════════════════
-
-    async endShift() {
-      if (!confirm('End shift? This will close all open sessions and push data to the server.')) return;
-
-      this.errorMessage = null;
-
-      try {
-        var res = await this._fetchWithTimeout(CONFIG.syncServiceUrl + '/sync/flush', {
-          method: 'POST',
-        });
-        var data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(data.error || 'Flush failed');
-        }
-
-        alert('Shift ended. ' + (data.message || ''));
-        this.refreshTodaySummary();
-      } catch (err) {
-        this.errorMessage = 'End shift failed: ' + (err.message || 'Unknown error');
-        var self = this;
-        setTimeout(function () { self.errorMessage = null; }, 5000);
-      }
-    },
-
-    // ══════════════════════════════════════════════════════════════
     // Display helpers
     // ══════════════════════════════════════════════════════════════
 

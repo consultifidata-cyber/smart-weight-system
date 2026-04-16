@@ -114,6 +114,7 @@ export const testConfig: SyncServiceConfig = {
   dbPath: ':memory:',
   djangoServerUrl: 'http://localhost:8000',
   djangoApiToken: 'test-token',
+  bagSyncIntervalMs: 10000,
   syncRetryIntervalMs: 1000,
   masterSyncIntervalMs: 60000,
   syncPushTimeoutMs: 5000,

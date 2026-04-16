@@ -1,6 +1,11 @@
 // ── Sync status lifecycle ──
-// LOCAL = session created locally, not yet closed/pushed (bags accumulating)
-export type SyncStatus = 'LOCAL' | 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
+// LOCAL  = created locally, no Django doc yet
+// ONLINE = open on both SQLite and Django (doc_id set, bags syncing individually)
+// PENDING = closed locally, waiting to push to Django
+// SYNCING = push in progress
+// SYNCED  = fully pushed and confirmed by Django
+// FAILED  = non-retryable push failure
+export type SyncStatus = 'LOCAL' | 'ONLINE' | 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
 
 // ── Session status lifecycle (bag-by-bag) ──
 export type SessionStatus = 'OPEN' | 'CLOSED';

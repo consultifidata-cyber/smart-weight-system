@@ -19,6 +19,7 @@ export interface SyncServiceConfig {
   djangoApiToken: string;
 
   // Sync timers
+  bagSyncIntervalMs: number;
   syncRetryIntervalMs: number;
   masterSyncIntervalMs: number;
   syncPushTimeoutMs: number;
@@ -38,6 +39,7 @@ const config: SyncServiceConfig = Object.freeze({
   djangoServerUrl: process.env.DJANGO_SERVER_URL || 'http://127.0.0.1:8000',
   djangoApiToken: process.env.DJANGO_API_TOKEN || '5b6adcee11d92c2d24144253644458527a61c5a954ffd355e11484597fe7d326',
 
+  bagSyncIntervalMs: parseInt(process.env.BAG_SYNC_INTERVAL_MS || '10000', 10),
   syncRetryIntervalMs: parseInt(process.env.SYNC_RETRY_INTERVAL_MS || '60000', 10),
   masterSyncIntervalMs: parseInt(process.env.MASTER_SYNC_INTERVAL_MS || '3600000', 10),
   syncPushTimeoutMs: parseInt(process.env.SYNC_PUSH_TIMEOUT_MS || '10000', 10),

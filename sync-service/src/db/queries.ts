@@ -52,6 +52,12 @@ export class Queries {
   private _closeStaleSessionsForDate!: Database.Statement;
   private _listStaleOpenSessions!: Database.Statement;
 
+  // ── Real-time sync statements ──
+  private _listLocalSessions!: Database.Statement;
+  private _listUnsyncedBags!: Database.Statement;
+  private _moveBagsToSession!: Database.Statement;
+  private _markSessionClosedExternally!: Database.Statement;
+
   // ── Bag statements ──
   private _insertBag!: Database.Statement;
   private _getBagsBySession!: Database.Statement;
@@ -154,7 +160,7 @@ export class Queries {
 
     this._updateSessionOnline = this.db.prepare(`
       UPDATE fg_session
-      SET doc_id = ?, prod_no = ?, day_seq = ?, is_offline = 0, sync_status = 'SYNCED'
+      SET doc_id = ?, prod_no = ?, day_seq = ?, is_offline = 0, sync_status = 'ONLINE'
       WHERE session_id = ?
     `);
 
@@ -230,6 +236,30 @@ export class Queries {
       SELECT * FROM fg_session
       WHERE station_id = ? AND status = 'OPEN' AND entry_date < ?
       ORDER BY created_at ASC
+    `);
+
+    // ── Real-time sync statements ──────────────────────────────────────
+    this._listLocalSessions = this.db.prepare(`
+      SELECT * FROM fg_session
+      WHERE station_id = ? AND entry_date = ? AND status = 'OPEN' AND doc_id IS NULL
+      ORDER BY created_at ASC
+    `);
+
+    this._listUnsyncedBags = this.db.prepare(`
+      SELECT b.* FROM fg_bag b
+      JOIN fg_session s ON b.session_id = s.session_id
+      WHERE s.station_id = ? AND s.entry_date = ? AND s.doc_id IS NOT NULL AND b.synced = 0
+      ORDER BY b.created_at ASC
+    `);
+
+    this._moveBagsToSession = this.db.prepare(`
+      UPDATE fg_bag SET session_id = ? WHERE session_id = ? AND synced = 0
+    `);
+
+    this._markSessionClosedExternally = this.db.prepare(`
+      UPDATE fg_session
+      SET status = 'CLOSED', sync_status = 'SYNCED', closed_at = datetime('now')
+      WHERE session_id = ?
     `);
 
     // ── Bag statements ───────────────────────────────────────────────────
@@ -445,6 +475,31 @@ export class Queries {
       this._updateSessionClosed.run(sessionId);
       this._updateSessionSyncStatus.run('PENDING', null, sessionId);
     })();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Real-time sync operations (per-bag Django sync)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** OPEN sessions with no Django doc_id — need client.openSession() */
+  listLocalSessions(stationId: string, today: string): FGSession[] {
+    return this._listLocalSessions.all(stationId, today) as FGSession[];
+  }
+
+  /** Bags not yet pushed to Django, whose session already has a doc_id */
+  listUnsyncedBags(stationId: string, today: string): FGBag[] {
+    return this._listUnsyncedBags.all(stationId, today) as FGBag[];
+  }
+
+  /** Move unsynced bags (synced=0) from old session to new session (rollover) */
+  moveBagsToSession(oldSessionId: string, newSessionId: string): number {
+    const result = this._moveBagsToSession.run(newSessionId, oldSessionId);
+    return result.changes;
+  }
+
+  /** Mark a session as closed by an external actor (e.g., dispatch-triggered close) */
+  markSessionClosedExternally(sessionId: string): void {
+    this._markSessionClosedExternally.run(sessionId);
   }
 
   /** Get today's bag summary grouped by pack_config for display */

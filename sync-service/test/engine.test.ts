@@ -19,6 +19,7 @@ beforeEach(() => {
     dbPath: ':memory:',
     djangoServerUrl: 'http://localhost:8000',
     djangoApiToken: 'test-token',
+    bagSyncIntervalMs: 10000,
     syncRetryIntervalMs: 60000,
     masterSyncIntervalMs: 3600000,
     syncPushTimeoutMs: 5000,
@@ -508,5 +509,395 @@ describe('SyncEngine max retry exhaustion', () => {
 
     const updated = queries.getSession('under-max')!;
     assert.equal(updated.sync_status, 'PENDING');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// syncLocalSessions (real-time: LOCAL → ONLINE)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('SyncEngine.syncLocalSessions', () => {
+  it('registers LOCAL sessions with Django and transitions to ONLINE', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    const session = makeSession({
+      session_id: 'local-1',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'LOCAL',
+      is_offline: 1,
+      doc_id: null,
+    });
+    queries.insertSession(session);
+
+    await (engine as any).syncLocalSessions(today);
+
+    const updated = queries.getSession('local-1')!;
+    assert.equal(updated.sync_status, 'ONLINE');
+    assert.equal(updated.doc_id, 100);
+    assert.equal(updated.prod_no, 'FGP-150426-03');
+    assert.equal(updated.is_offline, 0);
+
+    // Verify client.openSession was called
+    const openCall = client.calls.find(c => c.method === 'openSession');
+    assert.ok(openCall);
+  });
+
+  it('leaves session LOCAL when Django is unreachable', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    client.shouldFail = true;
+
+    const session = makeSession({
+      session_id: 'local-offline',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'LOCAL',
+      is_offline: 1,
+      doc_id: null,
+    });
+    queries.insertSession(session);
+
+    await (engine as any).syncLocalSessions(today);
+
+    const updated = queries.getSession('local-offline')!;
+    assert.equal(updated.sync_status, 'LOCAL');
+    assert.equal(updated.doc_id, null);
+  });
+
+  it('skips sessions that already have doc_id', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    const session = makeSession({
+      session_id: 'already-online',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'ONLINE',
+      is_offline: 0,
+      doc_id: 50,
+    });
+    queries.insertSession(session);
+
+    await (engine as any).syncLocalSessions(today);
+
+    // Should not call openSession — session already has doc_id
+    const openCalls = client.calls.filter(c => c.method === 'openSession');
+    assert.equal(openCalls.length, 0);
+  });
+
+  it('handles multiple LOCAL sessions for different products', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    queries.insertSession(makeSession({
+      session_id: 'local-a',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'LOCAL',
+      is_offline: 1,
+      doc_id: null,
+      pack_config_id: 10,
+    }));
+    queries.insertSession(makeSession({
+      session_id: 'local-b',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'LOCAL',
+      is_offline: 1,
+      doc_id: null,
+      pack_config_id: 20,
+    }));
+
+    await (engine as any).syncLocalSessions(today);
+
+    assert.equal(queries.getSession('local-a')!.sync_status, 'ONLINE');
+    assert.equal(queries.getSession('local-b')!.sync_status, 'ONLINE');
+
+    const openCalls = client.calls.filter(c => c.method === 'openSession');
+    assert.equal(openCalls.length, 2);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// syncUnsyncedBags (real-time: push individual bags)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('SyncEngine.syncUnsyncedBags', () => {
+  it('pushes unsynced bags to Django and marks them synced', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    // Session with doc_id (ONLINE)
+    const session = makeSession({
+      session_id: 'online-1',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'ONLINE',
+      is_offline: 0,
+      doc_id: 100,
+    });
+    queries.insertSession(session);
+    queries.insertBag(makeBag('online-1', {
+      bag_id: 'unsync-b1',
+      qr_code: 'QR-UNSYNC-1',
+      synced: 0,
+    }));
+
+    await (engine as any).syncUnsyncedBags(today);
+
+    // Bag should be marked synced
+    const bags = queries.getBagsBySession('online-1');
+    assert.equal(bags[0].synced, 1);
+    assert.equal(bags[0].line_id, 200); // from mock addBagResponse
+
+    // Verify client.addBag was called
+    const addCall = client.calls.find(c => c.method === 'addBag');
+    assert.ok(addCall);
+  });
+
+  it('skips bags whose session has no doc_id', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    // LOCAL session — no doc_id
+    const session = makeSession({
+      session_id: 'no-doc',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'LOCAL',
+      is_offline: 1,
+      doc_id: null,
+    });
+    queries.insertSession(session);
+    queries.insertBag(makeBag('no-doc', {
+      bag_id: 'skip-b1',
+      qr_code: 'QR-SKIP-1',
+      synced: 0,
+    }));
+
+    await (engine as any).syncUnsyncedBags(today);
+
+    // addBag should not have been called
+    const addCalls = client.calls.filter(c => c.method === 'addBag');
+    assert.equal(addCalls.length, 0);
+
+    // Bag should still be unsynced
+    const bags = queries.getBagsBySession('no-doc');
+    assert.equal(bags[0].synced, 0);
+  });
+
+  it('does not re-push already synced bags', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    const session = makeSession({
+      session_id: 'already-synced',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'ONLINE',
+      is_offline: 0,
+      doc_id: 100,
+    });
+    queries.insertSession(session);
+    queries.insertBag(makeBag('already-synced', {
+      bag_id: 'synced-b1',
+      qr_code: 'QR-SYNCED-1',
+      synced: 1,  // already synced
+      line_id: 50,
+    }));
+
+    await (engine as any).syncUnsyncedBags(today);
+
+    // addBag should not have been called
+    const addCalls = client.calls.filter(c => c.method === 'addBag');
+    assert.equal(addCalls.length, 0);
+  });
+
+  it('leaves bag unsynced when addBag fails (non-409)', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    client.shouldFail = true;
+    client.failError = 'Server error 500';
+
+    const session = makeSession({
+      session_id: 'fail-bag',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'ONLINE',
+      is_offline: 0,
+      doc_id: 100,
+    });
+    queries.insertSession(session);
+    queries.insertBag(makeBag('fail-bag', {
+      bag_id: 'fail-b1',
+      qr_code: 'QR-FAIL-BAG-1',
+      synced: 0,
+    }));
+
+    await (engine as any).syncUnsyncedBags(today);
+
+    // Bag should still be unsynced
+    const bags = queries.getBagsBySession('fail-bag');
+    assert.equal(bags[0].synced, 0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// handleSessionRollover (409 from Django)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('SyncEngine.handleSessionRollover', () => {
+  it('marks old session CLOSED+SYNCED, creates new session, moves unsynced bags', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    const oldSession = makeSession({
+      session_id: 'rollover-old',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'ONLINE',
+      is_offline: 0,
+      doc_id: 100,
+      pack_config_id: 10,
+      item_id: 1,
+      pack_name: 'Test Pack 500g',
+    });
+    queries.insertSession(oldSession);
+    // Allocate day_seq 1 for the old session
+    queries.getNextDaySeq('ST01', today);
+
+    // Bag 1 synced, bag 2 unsynced
+    queries.insertBag(makeBag('rollover-old', {
+      bag_id: 'ro-b1',
+      qr_code: 'QR-RO-1',
+      synced: 1,
+      line_id: 50,
+    }));
+    queries.insertBag(makeBag('rollover-old', {
+      bag_id: 'ro-b2',
+      qr_code: 'QR-RO-2',
+      synced: 0,
+    }));
+
+    await (engine as any).handleSessionRollover(oldSession, today);
+
+    // Old session should be CLOSED + SYNCED
+    const old = queries.getSession('rollover-old')!;
+    assert.equal(old.status, 'CLOSED');
+    assert.equal(old.sync_status, 'SYNCED');
+
+    // A new session should exist
+    const openSessions = queries.listOpenSessions('ST01');
+    assert.equal(openSessions.length, 1);
+    const newSess = openSessions[0];
+    assert.notEqual(newSess.session_id, 'rollover-old');
+    assert.equal(newSess.status, 'OPEN');
+    assert.equal(newSess.sync_status, 'LOCAL');
+    assert.equal(newSess.pack_config_id, 10);
+    assert.equal(newSess.doc_id, null);
+
+    // day_seq should have incremented (old was 1, new should be 2)
+    assert.equal(newSess.day_seq, 2);
+
+    // Unsynced bag should be moved to new session
+    const newBags = queries.getBagsBySession(newSess.session_id);
+    assert.equal(newBags.length, 1);
+    assert.equal(newBags[0].bag_id, 'ro-b2');
+
+    // Synced bag stays in old session
+    const oldBags = queries.getBagsBySession('rollover-old');
+    assert.equal(oldBags.length, 1);
+    assert.equal(oldBags[0].bag_id, 'ro-b1');
+    assert.equal(oldBags[0].synced, 1);
+  });
+
+  it('does not create new session when no unsynced bags remain', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    const oldSession = makeSession({
+      session_id: 'rollover-empty',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'ONLINE',
+      is_offline: 0,
+      doc_id: 100,
+    });
+    queries.insertSession(oldSession);
+
+    // Only synced bags
+    queries.insertBag(makeBag('rollover-empty', {
+      bag_id: 're-b1',
+      qr_code: 'QR-RE-1',
+      synced: 1,
+      line_id: 50,
+    }));
+
+    await (engine as any).handleSessionRollover(oldSession, today);
+
+    // Old session should be CLOSED
+    assert.equal(queries.getSession('rollover-empty')!.status, 'CLOSED');
+
+    // No new session created
+    const openSessions = queries.listOpenSessions('ST01');
+    assert.equal(openSessions.length, 0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// syncBagsCycle (full cycle guard)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('SyncEngine.syncBagsCycle', () => {
+  it('skips when client is not configured', async () => {
+    client.isConfigured = false;
+
+    const today = new Date().toISOString().substring(0, 10);
+    queries.insertSession(makeSession({
+      session_id: 'skip-unconfigured',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'LOCAL',
+      is_offline: 1,
+      doc_id: null,
+    }));
+
+    await engine.syncBagsCycle();
+
+    // Nothing should have been called
+    assert.equal(client.calls.length, 0);
+    // Session should still be LOCAL
+    assert.equal(queries.getSession('skip-unconfigured')!.sync_status, 'LOCAL');
+  });
+
+  it('runs full cycle: register session then push bag', async () => {
+    const today = new Date().toISOString().substring(0, 10);
+    // LOCAL session with an unsynced bag
+    queries.insertSession(makeSession({
+      session_id: 'full-cycle',
+      station_id: 'ST01',
+      entry_date: today,
+      status: 'OPEN',
+      sync_status: 'LOCAL',
+      is_offline: 1,
+      doc_id: null,
+    }));
+    queries.insertBag(makeBag('full-cycle', {
+      bag_id: 'fc-b1',
+      qr_code: 'QR-FC-1',
+      synced: 0,
+    }));
+
+    // First cycle: registers session (LOCAL → ONLINE)
+    await engine.syncBagsCycle();
+
+    const afterFirst = queries.getSession('full-cycle')!;
+    assert.equal(afterFirst.sync_status, 'ONLINE');
+    assert.equal(afterFirst.doc_id, 100);
+
+    // Bag might not be synced yet in same cycle (listUnsyncedBags
+    // checks doc_id IS NOT NULL, which was just set), but the query
+    // was run before updateSessionOnline. Run another cycle.
+    await engine.syncBagsCycle();
+
+    const bags = queries.getBagsBySession('full-cycle');
+    assert.equal(bags[0].synced, 1);
+    assert.equal(bags[0].line_id, 200);
   });
 });

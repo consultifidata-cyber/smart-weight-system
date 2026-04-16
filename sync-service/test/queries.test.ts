@@ -91,7 +91,7 @@ describe('Session queries', () => {
     assert.equal(got.prod_no, 'FGP-150426-06');
     assert.equal(got.day_seq, 6);
     assert.equal(got.is_offline, 0);
-    assert.equal(got.sync_status, 'SYNCED');
+    assert.equal(got.sync_status, 'ONLINE');
   });
 
   it('listPendingSessions returns only PENDING sync_status, ordered by created_at', () => {

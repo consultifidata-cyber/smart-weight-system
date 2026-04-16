@@ -1,4 +1,6 @@
+import { randomUUID } from 'crypto';
 import logger from '../utils/logger.js';
+import { generateSessionIdempotencyKey } from './idempotency.js';
 import type { Queries } from '../db/queries.js';
 import type { DjangoClient } from './client.js';
 import type { FGSession, FGBag } from '../types.js';
@@ -10,10 +12,14 @@ export class SyncEngine {
   private queries: Queries;
   private client: DjangoClient;
   private stationId: string;
+  private plantId: string;
   private retryIntervalMs: number;
   private masterSyncIntervalMs: number;
+  private bagSyncIntervalMs: number;
   private retryTimerId: ReturnType<typeof setInterval> | null = null;
   private masterTimerId: ReturnType<typeof setInterval> | null = null;
+  private bagSyncTimerId: ReturnType<typeof setInterval> | null = null;
+  private bagSyncRunning = false; // guard against overlapping cycles
 
   constructor(
     queries: Queries,
@@ -23,22 +29,31 @@ export class SyncEngine {
     this.queries = queries;
     this.client = client;
     this.stationId = config.stationId;
+    this.plantId = config.plantId;
     this.retryIntervalMs = config.syncRetryIntervalMs;
     this.masterSyncIntervalMs = config.masterSyncIntervalMs;
+    this.bagSyncIntervalMs = config.bagSyncIntervalMs;
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   start(): void {
     logger.info(
-      { retryIntervalMs: this.retryIntervalMs, masterSyncIntervalMs: this.masterSyncIntervalMs },
+      {
+        retryIntervalMs: this.retryIntervalMs,
+        masterSyncIntervalMs: this.masterSyncIntervalMs,
+        bagSyncIntervalMs: this.bagSyncIntervalMs,
+      },
       'Sync engine started',
     );
 
     // Auto-close stale sessions from past dates on startup
     this.closeAndQueueStaleSessions();
 
-    // Retry loop: auto-close stale + push pending
+    // Layer 2: Fast per-bag sync loop (default 10s)
+    this.bagSyncTimerId = setInterval(() => this.syncBagsCycle(), this.bagSyncIntervalMs);
+
+    // Retry loop: auto-close stale + push pending offline sessions (default 60s)
     this.retryTimerId = setInterval(() => {
       this.closeAndQueueStaleSessions();
       this.retryPendingSessions();
@@ -52,6 +67,10 @@ export class SyncEngine {
   }
 
   stop(): void {
+    if (this.bagSyncTimerId) {
+      clearInterval(this.bagSyncTimerId);
+      this.bagSyncTimerId = null;
+    }
     if (this.retryTimerId) {
       clearInterval(this.retryTimerId);
       this.retryTimerId = null;
@@ -61,6 +80,202 @@ export class SyncEngine {
       this.masterTimerId = null;
     }
     logger.info('Sync engine stopped');
+  }
+
+  // ── Real-time per-bag sync (Layer 1 + Layer 2) ─────────────────────────
+
+  private _pendingSync: Promise<void> = Promise.resolve();
+
+  /**
+   * Public trigger for inline sync — called by bags.ts right after insert.
+   * Fire-and-forget: does not block the HTTP response.
+   */
+  syncBagNow(): void {
+    this._pendingSync = this.syncBagsCycle().catch(err => {
+      const error = err instanceof Error ? err.message : String(err);
+      logger.warn({ error }, 'Inline bag sync cycle failed');
+    });
+  }
+
+  /** Await completion of any in-flight sync cycle (used by tests). */
+  waitForPendingSync(): Promise<void> {
+    return this._pendingSync;
+  }
+
+  /**
+   * One full sync cycle: register LOCAL sessions → push unsynced bags.
+   * Guarded so overlapping calls don't pile up.
+   */
+  async syncBagsCycle(): Promise<void> {
+    if (this.bagSyncRunning) return;
+    if (!this.client.isConfigured) return;
+
+    this.bagSyncRunning = true;
+    try {
+      const today = new Date().toISOString().substring(0, 10);
+      await this.syncLocalSessions(today);
+      await this.syncUnsyncedBags(today);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      logger.error({ error }, 'Bag sync cycle error');
+    } finally {
+      this.bagSyncRunning = false;
+    }
+  }
+
+  /**
+   * Step A: Find LOCAL sessions (no doc_id) and register them with Django.
+   * On success, session transitions LOCAL → ONLINE (doc_id set).
+   */
+  async syncLocalSessions(today: string): Promise<void> {
+    const locals = this.queries.listLocalSessions(this.stationId, today);
+    if (locals.length === 0) return;
+
+    for (const session of locals) {
+      try {
+        const resp = await this.client.openSession({
+          item_id: session.item_id,
+          pack_config_id: session.pack_config_id,
+          entry_date: session.entry_date,
+          shift: session.shift,
+        });
+
+        this.queries.updateSessionOnline(
+          session.session_id, resp.doc_id, resp.prod_no, resp.day_seq,
+        );
+
+        logger.info(
+          { sessionId: session.session_id, docId: resp.doc_id, prodNo: resp.prod_no, daySeq: resp.day_seq },
+          'Session registered with Django (LOCAL → ONLINE)',
+        );
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        logger.warn(
+          { sessionId: session.session_id, error },
+          'Failed to register session with Django — will retry next cycle',
+        );
+        // Session stays LOCAL, retry next cycle
+      }
+    }
+  }
+
+  /**
+   * Step B: Find bags with synced=0 whose session has a doc_id, push each
+   * to Django via addBag(). On success, mark bag synced=1.
+   *
+   * Handles 409 (session closed externally by dispatch) via rollover.
+   */
+  async syncUnsyncedBags(today: string): Promise<void> {
+    const bags = this.queries.listUnsyncedBags(this.stationId, today);
+    if (bags.length === 0) return;
+
+    for (const bag of bags) {
+      const session = this.queries.getSession(bag.session_id);
+      if (!session || !session.doc_id) continue;
+
+      try {
+        const resp = await this.client.addBag({
+          doc_id: session.doc_id,
+          item_id: bag.item_id,
+          pack_config_id: bag.pack_config_id,
+          qr_code: bag.qr_code,
+          actual_weight_gm: bag.actual_weight_gm,
+          offer_id: bag.offer_id,
+          batch_no: bag.batch_no,
+          note: bag.note,
+        });
+
+        this.queries.updateBagSynced(bag.bag_id, resp.line_id);
+        logger.info(
+          { bagId: bag.bag_id, qrCode: bag.qr_code, lineId: resp.line_id },
+          'Bag synced to Django',
+        );
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+
+        // 409 = session was closed externally (dispatch-triggered post+approve)
+        if (error.includes('409')) {
+          logger.warn(
+            { sessionId: bag.session_id, bagId: bag.bag_id },
+            'Session closed externally (409) — initiating rollover',
+          );
+          await this.handleSessionRollover(session, today);
+          // Stop processing this batch — next cycle will pick up moved bags
+          break;
+        }
+
+        logger.warn({ bagId: bag.bag_id, error }, 'Failed to sync bag — will retry next cycle');
+      }
+    }
+  }
+
+  /**
+   * Handle external session close (409 from Django):
+   * 1. Mark old session CLOSED + SYNCED locally
+   * 2. Create new session with next day_seq
+   * 3. Move unsynced bags from old → new session
+   *
+   * Next sync cycle will register the new session and push the moved bags.
+   */
+  async handleSessionRollover(closedSession: FGSession, today: string): Promise<void> {
+    // Mark old session as closed by dispatch
+    this.queries.markSessionClosedExternally(closedSession.session_id);
+
+    // Check for unsynced bags to move
+    const unsyncedBags = this.queries.getBagsBySession(closedSession.session_id)
+      .filter((b: FGBag) => b.synced === 0);
+
+    if (unsyncedBags.length === 0) {
+      logger.info(
+        { sessionId: closedSession.session_id },
+        'Session closed externally, no unsynced bags to move',
+      );
+      return;
+    }
+
+    // Create new session for same pack_config with next day_seq
+    const daySeq = this.queries.getNextDaySeq(this.stationId, today);
+    const sessionId = randomUUID();
+    const idempotencyKey = generateSessionIdempotencyKey(this.stationId, today, sessionId);
+    const now = new Date().toISOString();
+
+    const newSession: FGSession = {
+      session_id: sessionId,
+      doc_id: null,
+      prod_no: null,
+      day_seq: daySeq,
+      station_id: this.stationId,
+      plant_id: this.plantId,
+      entry_date: today,
+      shift: closedSession.shift,
+      item_id: closedSession.item_id,
+      pack_config_id: closedSession.pack_config_id,
+      pack_name: closedSession.pack_name,
+      status: 'OPEN',
+      is_offline: 1,
+      idempotency_key: idempotencyKey,
+      created_at: now,
+      closed_at: null,
+      sync_status: 'LOCAL',
+      sync_attempts: 0,
+      sync_error: null,
+      last_sync_at: null,
+    };
+
+    this.queries.insertSession(newSession);
+
+    // Move unsynced bags to new session
+    const moved = this.queries.moveBagsToSession(closedSession.session_id, sessionId);
+
+    logger.info(
+      {
+        oldSession: closedSession.session_id,
+        newSession: sessionId,
+        daySeq,
+        movedBags: moved,
+      },
+      'Session rollover complete — new session created, unsynced bags moved',
+    );
   }
 
   // ── Offline session retry (push-entry bulk push) ───────────────────────

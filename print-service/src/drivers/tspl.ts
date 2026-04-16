@@ -61,9 +61,8 @@ export class TSPLDriver implements PrinterDriver {
     const { data: bmpData, widthBytes, heightDots } = generateQrBitmap(qrContent, qrTargetDots);
 
     // Centre QR bitmap on the label.
-    // +64 dots (~8mm) right-shift to compensate for printer mechanical offset.
     const bmpWidthDots = Math.ceil(qrTargetDots / 8) * 8; // byte-aligned width
-    const bmpX = Math.round((labelWidthDots - bmpWidthDots) / 2) + 64;
+    const bmpX = Math.round((labelWidthDots - bmpWidthDots) / 2);
 
     // Vertical: centre the full content block (bitmap + gap + 2 text lines)
     // Block height: 336 (bitmap) + 4 (gap) + 16 (line1) + 4 (gap) + 16 (line2) = 376
@@ -95,16 +94,14 @@ export class TSPLDriver implements PrinterDriver {
     const line1 = textLines[0] || '';
     const line1CharWidth = 12;
     const line1Width = line1.length * line1CharWidth;
-    // +44 dots (5.5mm) right-shift on text to match QR visual centre
-    const textRightShift = 44;
-    const line1X = Math.max(10, Math.round((labelWidthDots - line1Width) / 2) + textRightShift);
+    const line1X = Math.max(10, Math.round((labelWidthDots - line1Width) / 2));
     const line1Y = textStartY;
 
     // Line 2: font "2" (12×16 dots per char)
     const line2 = textLines[1] || '';
     const line2CharWidth = 12;
     const line2Width = line2.length * line2CharWidth;
-    const line2X = Math.max(10, Math.round((labelWidthDots - line2Width) / 2) + textRightShift);
+    const line2X = Math.max(10, Math.round((labelWidthDots - line2Width) / 2));
     const line2Y = line1Y + 20; // 16 dots char height + 4 dots gap
 
     const textCmds = [

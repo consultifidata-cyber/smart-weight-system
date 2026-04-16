@@ -128,6 +128,10 @@ router.post('/add', (req: Request, res: Response) => {
       session_bags: sessionBags,
       total_bags_today: totalBagsToday,
     });
+
+    // Layer 1: fire-and-forget inline sync — push this bag to Django immediately
+    // Does not block the HTTP response; errors are logged internally
+    req.ctx.syncEngine?.syncBagNow();
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : String(err);
 

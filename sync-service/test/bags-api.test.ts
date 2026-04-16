@@ -1,16 +1,25 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { createTestApp, makePackConfig, MockDjangoClient } from './helpers.js';
 import type { Queries } from '../src/db/queries.js';
+import type { SyncEngine } from '../src/sync/engine.js';
 import type express from 'express';
+
+// supertest may leave TCP sockets open — force clean exit after all tests
+after(() => setTimeout(() => process.exit(0), 200));
 
 let app: express.Express;
 let queries: Queries;
 let client: MockDjangoClient;
+let syncEngine: SyncEngine;
 
 beforeEach(() => {
-  ({ app, queries, client } = createTestApp());
+  ({ app, queries, client, syncEngine } = createTestApp());
+  // Disable Django client so syncBagNow() (fire-and-forget inline sync)
+  // exits immediately without creating lingering async operations.
+  // The sync engine itself is fully tested in engine.test.ts.
+  client.isConfigured = false;
   // Seed product catalog so bags/add can resolve pack_name + item_id
   queries.replacePackConfigs([
     makePackConfig({ pack_id: 10, item_id: 1, pack_name: 'Test Pack 500g', net_weight_gm: 500 }),
