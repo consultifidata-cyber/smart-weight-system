@@ -131,6 +131,12 @@ Write-Step "3/9" "Station configuration"
 $envFile = Join-Path $repoRoot ".env"
 $templateFile = Join-Path $repoRoot "deploy\config-template.env"
 
+if (-not (Test-Path $templateFile)) {
+    Write-Err "Template file not found: $templateFile"
+    Write-Host "  Re-clone the repository or restore deploy\config-template.env." -ForegroundColor Yellow
+    exit 1
+}
+
 if (Test-Path $envFile) {
     Write-Warn ".env already exists. Skipping configuration."
     Write-Host "  To reconfigure, delete .env and re-run this script." -ForegroundColor DarkGray
@@ -157,15 +163,23 @@ if (Test-Path $envFile) {
         if (-not $djangoUrl)    { $djangoUrl = "http://127.0.0.1:8000" }
         if (-not $djangoToken)  { $djangoToken = "CHANGE_ME" }
 
-        # Read template and replace placeholders
+        # Read template and replace placeholders.
+        # Escape '$' in user values — PowerShell -replace treats '$' in the
+        # replacement string as a regex back-reference ($1, $&, etc.), which
+        # silently mangles tokens or URLs that contain '$'.
+        function Safe-Replace($content, $placeholder, $value) {
+            $escapedValue = $value -replace '\$', '$$$$'
+            return $content -replace $placeholder, $escapedValue
+        }
+
         $envContent = Get-Content $templateFile -Raw
-        $envContent = $envContent -replace '__STATION_ID__', $stationId
-        $envContent = $envContent -replace '__PLANT_ID__', $plantId
-        $envContent = $envContent -replace '__COM_PORT__', $comPort
-        $envContent = $envContent -replace '__PRINTER_SHARE_NAME__', $printerShare
-        $envContent = $envContent -replace '__PRINTER_FULL_NAME__', $printerFull
-        $envContent = $envContent -replace '__DJANGO_URL__', $djangoUrl
-        $envContent = $envContent -replace '__DJANGO_TOKEN__', $djangoToken
+        $envContent = Safe-Replace $envContent '__STATION_ID__' $stationId
+        $envContent = Safe-Replace $envContent '__PLANT_ID__' $plantId
+        $envContent = Safe-Replace $envContent '__COM_PORT__' $comPort
+        $envContent = Safe-Replace $envContent '__PRINTER_SHARE_NAME__' $printerShare
+        $envContent = Safe-Replace $envContent '__PRINTER_FULL_NAME__' $printerFull
+        $envContent = Safe-Replace $envContent '__DJANGO_URL__' $djangoUrl
+        $envContent = Safe-Replace $envContent '__DJANGO_TOKEN__' $djangoToken
 
         Set-Content -Path $envFile -Value $envContent -Encoding UTF8
         Write-Ok ".env created with station config"
@@ -208,8 +222,10 @@ Write-Step "6/9" "Starting services via PM2"
 
 $ecosystemFile = Join-Path $repoRoot "deploy\ecosystem.config.js"
 
-# Kill any existing PM2 processes for this project
-pm2 delete all 2>$null
+# Remove only this project's services (leave other PM2 processes untouched)
+foreach ($svc in @('weight-service','print-service','sync-service','web-ui')) {
+    pm2 delete $svc 2>$null
+}
 
 pm2 start $ecosystemFile
 if ($LASTEXITCODE -ne 0) {
@@ -259,17 +275,20 @@ try {
 Write-Step "8/9" "Creating desktop shortcut"
 
 $desktopPath = [Environment]::GetFolderPath("Desktop")
-$desktopShortcut = Join-Path $desktopPath "Smart Weight System.lnk"
+$desktopShortcut = Join-Path $desktopPath "Smart Weight System.url"
 
 try {
-    $WshShell2 = New-Object -ComObject WScript.Shell
-    $shortcut2 = $WshShell2.CreateShortcut($desktopShortcut)
-    $shortcut2.TargetPath = "http://localhost:3000"
-    $shortcut2.Description = "Smart Weight System — Web UI"
-    $shortcut2.Save()
-    Write-Ok "Desktop shortcut created: Smart Weight System"
+    # .url (Internet Shortcut) opens correctly in the default browser.
+    # .lnk shortcuts cannot have a URL as TargetPath.
+    $urlContent = @"
+[InternetShortcut]
+URL=http://localhost:3000
+IconIndex=0
+"@
+    Set-Content -Path $desktopShortcut -Value $urlContent -Encoding ASCII
+    Write-Ok "Desktop shortcut created: Smart Weight System.url"
 } catch {
-    Write-Warn "Could not create desktop shortcut."
+    Write-Warn "Could not create desktop shortcut: $_"
 }
 
 # ── Step 9: Open Browser ─────────────────────────────────────

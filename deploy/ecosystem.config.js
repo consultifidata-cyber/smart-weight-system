@@ -6,24 +6,28 @@
  *   pm2 start deploy/ecosystem.config.js
  *   pm2 save
  *
- * Env vars are loaded from ../.env by each service via dotenv.
+ * Env vars are loaded from ../.env by each service's own config.ts (via dotenv).
  * The cwd for each service is set relative to this config file's location.
+ *
+ * tsx is hoisted to root node_modules by npm workspaces, so we use an absolute
+ * path as the interpreter. On Windows we need tsx.cmd (batch wrapper), on
+ * Linux/macOS the extensionless tsx symlink.
  */
 
 const path = require('path');
 const root = path.resolve(__dirname, '..');
+const isWin = process.platform === 'win32';
+const tsxBin = path.join(root, 'node_modules', '.bin', isWin ? 'tsx.cmd' : 'tsx');
 
 module.exports = {
   apps: [
     {
       name: 'weight-service',
-      script: 'node_modules/.bin/tsx',
-      args: 'src/index.ts',
+      script: 'src/index.ts',
       cwd: path.join(root, 'weight-service'),
-      interpreter: 'none',
+      interpreter: tsxBin,
       env: {
         NODE_ENV: 'production',
-        DOTENV_CONFIG_PATH: path.join(root, '.env'),
       },
       max_restarts: 50,
       min_uptime: '5s',
@@ -34,17 +38,15 @@ module.exports = {
       error_file: path.join(root, 'logs', 'weight-service-error.log'),
       out_file: path.join(root, 'logs', 'weight-service-out.log'),
       merge_logs: true,
-      max_size: '10M',
+      // Note: log rotation requires `pm2 install pm2-logrotate` (optional).
     },
     {
       name: 'print-service',
-      script: 'node_modules/.bin/tsx',
-      args: 'src/index.ts',
+      script: 'src/index.ts',
       cwd: path.join(root, 'print-service'),
-      interpreter: 'none',
+      interpreter: tsxBin,
       env: {
         NODE_ENV: 'production',
-        DOTENV_CONFIG_PATH: path.join(root, '.env'),
       },
       max_restarts: 50,
       min_uptime: '5s',
@@ -55,17 +57,15 @@ module.exports = {
       error_file: path.join(root, 'logs', 'print-service-error.log'),
       out_file: path.join(root, 'logs', 'print-service-out.log'),
       merge_logs: true,
-      max_size: '10M',
+      // Note: log rotation requires `pm2 install pm2-logrotate` (optional).
     },
     {
       name: 'sync-service',
-      script: 'node_modules/.bin/tsx',
-      args: 'src/index.ts',
+      script: 'src/index.ts',
       cwd: path.join(root, 'sync-service'),
-      interpreter: 'none',
+      interpreter: tsxBin,
       env: {
         NODE_ENV: 'production',
-        DOTENV_CONFIG_PATH: path.join(root, '.env'),
       },
       max_restarts: 50,
       min_uptime: '5s',
@@ -76,7 +76,7 @@ module.exports = {
       error_file: path.join(root, 'logs', 'sync-service-error.log'),
       out_file: path.join(root, 'logs', 'sync-service-out.log'),
       merge_logs: true,
-      max_size: '10M',
+      // Note: log rotation requires `pm2 install pm2-logrotate` (optional).
     },
     {
       name: 'web-ui',
@@ -96,7 +96,7 @@ module.exports = {
       error_file: path.join(root, 'logs', 'web-ui-error.log'),
       out_file: path.join(root, 'logs', 'web-ui-out.log'),
       merge_logs: true,
-      max_size: '10M',
+      // Note: log rotation requires `pm2 install pm2-logrotate` (optional).
     },
   ],
 };

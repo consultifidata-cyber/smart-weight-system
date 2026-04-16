@@ -31,6 +31,13 @@ if %ERRORLEVEL% neq 0 (
 echo  [Service Health Endpoints]
 echo  -------------------------
 
+where curl >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo  [WARN] curl.exe not found — cannot check HTTP endpoints.
+    echo         Install curl or upgrade to a recent Windows 10/11 build.
+    goto :skip_http
+)
+
 echo.
 echo  Weight Service (port 5000):
 curl -s -o nul -w "  HTTP %%{http_code} — %%{time_total}s" http://localhost:5000/health 2>nul
@@ -50,6 +57,8 @@ echo.
 echo  Web UI (port 3000):
 curl -s -o nul -w "  HTTP %%{http_code} — %%{time_total}s" http://localhost:3000/ 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
+
+:skip_http
 
 :: Sync status (bags today, pending sessions)
 echo.

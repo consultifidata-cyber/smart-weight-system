@@ -152,6 +152,22 @@ Before setting up the station software, register it in the Django ERP system.
    ```
    Type `Y` when prompted.
 
+   > **Edge case (some Windows 10 builds):** If you get an error like
+   > `Cannot bind parameter 'Scope'. Cannot convert value "CurrentUser"`,
+   > the `-Scope CurrentUser` flag is failing to parse. Use one of these workarounds:
+   >
+   > **Option A** — Scope to the current process only (no admin required):
+   > ```powershell
+   > Set-ExecutionPolicy RemoteSigned -Scope Process
+   > ```
+   > This lasts only for the current PowerShell window — enough to run the installer.
+   >
+   > **Option B** — Run as Administrator without `-Scope`:
+   > ```powershell
+   > Set-ExecutionPolicy RemoteSigned
+   > ```
+   > This sets the machine-wide policy. Requires the PowerShell window to be running as Administrator (step 1).
+
 3. Navigate to the repo and run the installer:
    ```powershell
    cd C:\smart-weight-system

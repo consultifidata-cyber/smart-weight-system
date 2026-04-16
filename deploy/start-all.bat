@@ -27,6 +27,11 @@ if %ERRORLEVEL% neq 0 (
 :: Create logs directory if it doesn't exist
 if not exist "logs" mkdir logs
 
+:: Remove previous instances of our services (prevents duplicates on re-run)
+for %%s in (weight-service print-service sync-service web-ui) do (
+    pm2 delete %%s >nul 2>&1
+)
+
 :: Start all services
 echo.
 echo  Starting services...

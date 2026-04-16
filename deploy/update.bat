@@ -14,10 +14,17 @@ echo.
 echo  Smart Weight System — Update
 echo  ========================================
 
-:: Check git is available
+:: Check prerequisites
 where git >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo  [ERROR] Git is not installed or not in PATH.
+    pause
+    exit /b 1
+)
+where pm2 >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo  [ERROR] PM2 is not installed or not in PATH.
+    echo  Run: npm install -g pm2
     pause
     exit /b 1
 )
@@ -40,10 +47,13 @@ if %ERRORLEVEL% neq 0 (
     echo  [WARNING] npm install had issues. Services may still work.
 )
 
-:: Restart all services
+:: Reload services from ecosystem config (picks up any config changes)
 echo.
 echo  [3/4] Restarting services...
-pm2 restart all
+for %%s in (weight-service print-service sync-service web-ui) do (
+    pm2 delete %%s >nul 2>&1
+)
+pm2 start deploy\ecosystem.config.js
 pm2 save
 
 :: Wait and show status
