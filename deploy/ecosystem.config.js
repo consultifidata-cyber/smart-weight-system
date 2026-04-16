@@ -11,15 +11,14 @@
  * to guess the .env location from import.meta.url (which is unreliable
  * under tsx.cmd on Windows).
  *
- * tsx is hoisted to root node_modules by npm workspaces, so we use an absolute
- * path as the interpreter. On Windows we need tsx.cmd (batch wrapper), on
- * Linux/macOS the extensionless tsx symlink.
+ * TypeScript services use `node --import tsx` instead of the tsx.cmd wrapper.
+ * PM2 uses child_process.spawn() which cannot execute .cmd/.bat files on
+ * Windows (EINVAL). Using node as the interpreter with --import tsx registers
+ * tsx's TypeScript loader hooks -- same result, no .cmd involved.
  */
 
 const path = require('path');
 const root = path.resolve(__dirname, '..');
-const isWin = process.platform === 'win32';
-const tsxBin = path.join(root, 'node_modules', '.bin', isWin ? 'tsx.cmd' : 'tsx');
 const dotenvPath = path.join(root, '.env');
 
 // Shared env block -- every service gets the absolute .env path
@@ -34,7 +33,8 @@ module.exports = {
       name: 'weight-service',
       script: 'src/index.ts',
       cwd: path.join(root, 'weight-service'),
-      interpreter: tsxBin,
+      interpreter: 'node',
+      interpreter_args: '--import tsx',
       env: sharedEnv,
       max_restarts: 50,
       min_uptime: '5s',
@@ -51,7 +51,8 @@ module.exports = {
       name: 'print-service',
       script: 'src/index.ts',
       cwd: path.join(root, 'print-service'),
-      interpreter: tsxBin,
+      interpreter: 'node',
+      interpreter_args: '--import tsx',
       env: sharedEnv,
       max_restarts: 50,
       min_uptime: '5s',
@@ -68,7 +69,8 @@ module.exports = {
       name: 'sync-service',
       script: 'src/index.ts',
       cwd: path.join(root, 'sync-service'),
-      interpreter: tsxBin,
+      interpreter: 'node',
+      interpreter_args: '--import tsx',
       env: sharedEnv,
       max_restarts: 50,
       min_uptime: '5s',
