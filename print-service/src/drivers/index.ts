@@ -12,7 +12,7 @@ export function createDriver(config: PrinterConfig): PrinterDriver {
 
   switch (driver.toLowerCase()) {
     case 'tspl':
-      return new TSPLDriver(device, labelWidth, labelHeight, dpi);
+      return new TSPLDriver(device, labelWidth, labelHeight, dpi, config.printerName);
 
     // Future: ZPL driver, ESCPOS driver, CUPS driver, etc.
     case 'zpl':

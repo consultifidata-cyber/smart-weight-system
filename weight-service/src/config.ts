@@ -10,11 +10,13 @@ dotenvConfig({ path: resolve(__dirname, '../../.env') });
 
 const simulate = process.env.SIMULATE_SERIAL === 'true';
 
+console.log(process.env.platform);
+
 const config: AppConfig = Object.freeze({
   stationId: process.env.STATION_ID || 'ST01',
 
   serial: Object.freeze({
-    port: process.env.SERIAL_PORT || (process.platform === 'linux' ? '/dev/ttyUSB0' : 'COM3'),
+    port: 'COM4',
     baudRate: parseInt(process.env.SERIAL_BAUD_RATE!, 10) || 9600,
     dataBits: parseInt(process.env.SERIAL_DATA_BITS!, 10) || 8,
     parity: process.env.SERIAL_PARITY || 'none',

@@ -66,7 +66,7 @@ router.post('/print', async (req: Request, res: Response) => {
     const commands = driver.buildLabel(labelData);
 
     // Send to printer
-    await driver.send(commands);
+    await driver.sendWin(commands);
 
     // Record this print request
     recentPrints.set(requestKey, Date.now());
@@ -104,7 +104,7 @@ router.get('/health', async (req: Request, res: Response) => {
   const { driver, config } = req.ctx as { driver: PrinterDriver; config: any };
 
   try {
-    const connected = await driver.healthCheck();
+    const connected = await driver.healthCheckWin();
 
     const response: HealthResponse = {
       printer: {

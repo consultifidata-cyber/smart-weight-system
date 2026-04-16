@@ -26,6 +26,20 @@
         <span class="status-dot" :class="printerConnected ? 'connected' : 'disconnected'"></span>
         Printer
       </div>
+      <div class="status-item">
+        <span class="status-dot" :class="syncConnected ? 'connected' : 'disconnected'"></span>
+        Sync
+      </div>
+    </div>
+
+    <!-- Today's bag count -->
+    <div class="today-bar">
+      <div class="today-total">
+        <span class="bags-number" x-text="totalBagsToday"></span>
+        <span class="bags-label">bags today</span>
+      </div>
+      <button class="end-shift-btn" @click="endShift()"
+        :disabled="state === 'PRINTING' || state === 'PRINTED'">End Shift</button>
     </div>
 
     <!-- Weight Display -->
@@ -37,30 +51,50 @@
       <div class="weight-status" x-text="weightLabel"></div>
     </div>
 
-    <!-- Product Dropdown -->
+    <!-- Product Selector (always visible) -->
     <div class="select-wrapper">
-      <select class="product-select" x-model="selectedProduct" @change="selectProduct()">
+      <select class="product-select" x-model="selectedPackId"
+        :disabled="state === 'PRINTING' || state === 'PRINTED'">
         <option value="">-- Select Product --</option>
-        <template x-for="p in products" :key="p.name">
-          <option :value="p.name" x-text="p.name"></option>
+        <template x-for="p in products" :key="p.pack_id">
+          <option
+            :value="p.pack_id"
+            x-text="p.name + (p.net_weight_gm ? ' (' + p.net_weight_gm + 'g)' : '')"
+          ></option>
         </template>
       </select>
       <span class="select-arrow">&#9662;</span>
     </div>
 
+    <!-- Expected weight range -->
+    <div class="weight-expected" x-show="selectedPackId && expectedWeightGm" x-transition>
+      Expected: <span x-text="expectedWeightRange"></span>
+    </div>
+
+    <!-- Last Bag Info + Reprint -->
+    <div class="last-bag-row" x-show="lastBag" x-transition>
+      <div class="last-bag-card">
+        <span class="last-bag-label">Last:</span>
+        <span class="last-bag-text" x-text="lastBagDisplay"></span>
+      </div>
+      <button class="reprint-btn"
+        :disabled="state === 'PRINTING' || state === 'PRINTED'"
+        @click="reprintLast()">Reprint</button>
+    </div>
+
     <!-- Spacer pushes button to bottom -->
     <div class="spacer"></div>
 
-    <!-- Print Button -->
+    <!-- PRINT button (always visible) -->
     <button
       class="print-btn"
       :class="{
         printing: state === 'PRINTING',
-        success: state === 'SUCCESS',
-        error: state === 'ERROR'
+        success: state === 'PRINTED',
+        error: state === 'PRINT_FAILED'
       }"
       :disabled="printButtonDisabled"
-      @click="doPrint()"
+      @click="state === 'PRINT_FAILED' ? retryPrint() : doPrint()"
       x-text="printButtonText"
     ></button>
 

@@ -15,6 +15,7 @@
   --color-card: #ffffff;
   --color-text: #1e293b;
   --color-text-light: #64748b;
+  --color-danger: #dc2626;
 }
 
 html, body {
@@ -28,7 +29,7 @@ html, body {
   -webkit-user-select: none;
 }
 
-/* --- Layout --- */
+/* ── Layout ── */
 
 .app {
   display: flex;
@@ -37,10 +38,10 @@ html, body {
   max-width: 600px;
   margin: 0 auto;
   padding: 16px;
-  gap: 16px;
+  gap: 12px;
 }
 
-/* --- Status Bar --- */
+/* ── Status Bar ── */
 
 .status-bar {
   display: flex;
@@ -72,7 +73,62 @@ html, body {
   gap: 4px;
 }
 
-/* --- Weight Display --- */
+/* ── Today Bar ── */
+
+.today-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  font-size: 0.85rem;
+}
+
+.today-total {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bags-number {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-primary);
+}
+
+.bags-label {
+  font-size: 0.85rem;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.end-shift-btn {
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 2px solid var(--color-text-light);
+  border-radius: 8px;
+  background: white;
+  color: var(--color-text-light);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.end-shift-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.end-shift-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Weight Display ── */
 
 .weight-card {
   flex: 0 0 auto;
@@ -80,7 +136,7 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 16px;
+  padding: 28px 16px;
   border-radius: 16px;
   background: var(--color-card);
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
@@ -120,7 +176,7 @@ html, body {
   font-weight: 500;
 }
 
-/* --- Product Dropdown --- */
+/* ── Product Dropdown ── */
 
 .select-wrapper {
   position: relative;
@@ -147,6 +203,11 @@ html, body {
   border-color: var(--color-primary);
 }
 
+.product-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .select-arrow {
   position: absolute;
   right: 16px;
@@ -157,10 +218,115 @@ html, body {
   pointer-events: none;
 }
 
-/* --- Print Button --- */
+/* ── Expected Weight Range ── */
+
+.weight-expected {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--color-text-light);
+  margin-top: -4px;
+}
+
+/* ── Last Bag Info + Reprint ── */
+
+.last-bag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.last-bag-row .last-bag-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.last-bag-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+
+/* ── Reprint Button ── */
+
+.reprint-btn {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 2px solid var(--color-primary);
+  border-radius: 8px;
+  background: white;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.reprint-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.reprint-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.last-bag-label {
+  color: var(--color-text-light);
+  white-space: nowrap;
+}
+
+.last-bag-text {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Action Buttons ── */
+
+.action-btn {
+  width: 100%;
+  min-height: 64px;
+  padding: 14px 24px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s, opacity 0.2s;
+  color: white;
+}
+
+.action-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.primary-btn {
+  background: var(--color-primary);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.primary-btn:disabled {
+  background: var(--color-disabled);
+  box-shadow: none;
+}
+
+/* ── Print Button ── */
 
 .print-btn {
-  flex: 0 0 auto;
   width: 100%;
   min-height: 80px;
   padding: 16px 24px;
@@ -199,7 +365,8 @@ html, body {
   background: var(--color-error);
 }
 
-/* --- Error Banner --- */
+
+/* ── Error Banner ── */
 
 .error-banner {
   position: fixed;
@@ -221,7 +388,7 @@ html, body {
   to { transform: translateY(0); }
 }
 
-/* --- Spacer to push print button to bottom --- */
+/* ── Spacer ── */
 
 .spacer {
   flex: 1;

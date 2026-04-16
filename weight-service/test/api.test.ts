@@ -28,7 +28,7 @@ function createMockContext(overrides: MockOverrides = {}): ServerContext {
     },
     config: {
       stationId: 'ST01',
-      serial: { port: 'COM3', simulate: false, baudRate: 9600, dataBits: 8, parity: 'none', stopBits: 1 },
+      serial: { port: 'COM4', simulate: false, baudRate: 9600, dataBits: 8, parity: 'none', stopBits: 1 },
       api: { port: 5000 },
       stability: { thresholdMs: 1500, toleranceKg: 0.02 },
       logLevel: 'info',

@@ -10,7 +10,8 @@ dotenvConfig({ path: resolve(__dirname, '../../.env') });
 
 const config: PrinterConfig = Object.freeze({
   driver: process.env.PRINTER_DRIVER || 'tspl',
-  device: process.env.PRINTER_DEVICE || '/dev/usb/lp0',
+  device: process.env.PRINTER_DEVICE || 'TVSLP46NEO',
+  printerName: process.env.PRINTER_NAME || 'SNBC TVSE LP 46 NEO BPLE',
   labelWidth: parseInt(process.env.PRINTER_LABEL_WIDTH || '50', 10),
   labelHeight: parseInt(process.env.PRINTER_LABEL_HEIGHT || '50', 10),
   dpi: parseInt(process.env.PRINTER_DPI || '203', 10),

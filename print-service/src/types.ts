@@ -42,19 +42,30 @@ export interface PrinterDriver {
   buildLabel(data: LabelData): Buffer;
 
   /**
-   * Send raw bytes to the physical printer.
+   * Send raw bytes to the physical printer (Linux: device file).
    */
   send(commands: Buffer): Promise<void>;
 
   /**
-   * Check if printer is reachable / connected.
+   * Send raw bytes to the physical printer (Windows: shared printer via copy /b).
+   */
+  sendWin(commands: Buffer): Promise<void>;
+
+  /**
+   * Check if printer is reachable / connected (Linux: fs.access on device file).
    */
   healthCheck(): Promise<boolean>;
+
+  /**
+   * Check if printer is reachable / connected (Windows: Get-Printer PowerShell query).
+   */
+  healthCheckWin(): Promise<boolean>;
 }
 
 export interface PrinterConfig {
   driver: string;
   device: string;
+  printerName: string;
   labelWidth: number;
   labelHeight: number;
   dpi: number;

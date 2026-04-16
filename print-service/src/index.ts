@@ -14,7 +14,7 @@ async function main(): Promise<void> {
     const driver = createDriver(config);
 
     // Health check on startup
-    const connected = await driver.healthCheck();
+    const connected = await driver.healthCheckWin();
     if (!connected) {
       logger.warn({ device: config.device }, 'Printer not reachable on startup');
     } else {

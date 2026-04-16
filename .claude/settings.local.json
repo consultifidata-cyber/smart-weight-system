@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(du -sh /home/localhost/Desktop/consultifi-data/smart-weight-system*)",
+      "WebFetch(domain:www.essae.com)",
+      "WebFetch(domain:www.scribd.com)",
+      "WebFetch(domain:5.imimg.com)",
+      "Bash(npm info:*)",
+      "Bash(python3 --version 2>/dev/null; pip3 --version 2>/dev/null)",
+      "Bash(npm install:*)",
+      "Bash(npm test:*)",
+      "Bash(node -e \"const { MockBinding } = require\\('@serialport/binding-mock'\\); console.log\\(Object.getOwnPropertyNames\\(MockBinding\\)\\)\" 2>&1 || node -e \"import\\('@serialport/binding-mock'\\).then\\(m => { console.log\\(Object.keys\\(m.MockBinding\\)\\); console.log\\(Object.getOwnPropertyNames\\(m.MockBinding.prototype\\)\\); console.log\\(Object.getOwnPropertyNames\\(m.MockBinding\\)\\) }\\)\" 2>&1)",
+      "Bash(node -e \"\nconst { MockBinding } = require\\('@serialport/binding-mock'\\);\nconst { SerialPort } = require\\('serialport'\\);\n\nMockBinding.createPort\\('/dev/TEST', { echo: false, record: true }\\);\nconst port = new SerialPort\\({ path: '/dev/TEST', baudRate: 9600, binding: MockBinding, autoOpen: false }\\);\nport.open\\(\\(\\) => {\n  console.log\\('Port opened'\\);\n  console.log\\('port.port type:', typeof port.port\\);\n  console.log\\('port.port keys:', Object.keys\\(port.port\\)\\);\n  console.log\\('has emitData:', typeof port.port.emitData\\);\n  port.port.emitData\\(Buffer.from\\('+025.450\\\\r\\\\n'\\)\\);\n  port.on\\('data', \\(d\\) => console.log\\('Got data:', d.toString\\(\\)\\)\\);\n  setTimeout\\(\\(\\) => { port.close\\(\\); process.exit\\(\\); }, 500\\);\n}\\);\n\" 2>&1)",
+      "Bash(cd /home/localhost/Desktop/consultifi-data/smart-weight-system/weight-service && npx tsc --noEmit 2>&1)",
+      "WebFetch(domain:www.manualslib.com)",
+      "Bash(curl -sL \"https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js\" -o /home/localhost/Desktop/consultifi-data/smart-weight-system/web-ui/public/lib/alpine.min.js && wc -c /home/localhost/Desktop/consultifi-data/smart-weight-system/web-ui/public/lib/alpine.min.js)",
+      "Bash(cd /home/localhost/Desktop/consultifi-data/smart-weight-system/web-ui && node --test 'test/*.test.js' 2>&1)",
+      "Bash(npx tsx:*)",
+      "Bash(node --test test/counter.test.js)",
+      "Bash(powershell:*)",
+      "Bash(npx tsc:*)",
+      "Bash(disown)",
+      "Bash(curl -s http://localhost:5001/print/health)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost:5001/health)",
+      "Bash(npm -v)",
+      "Bash(node:*)",
+      "Bash(rm -f sync-service/data/fg_production.db)",
+      "Bash(curl -s http://localhost:5002/health)",
+      "Bash(curl -s http://localhost:5002/products)",
+      "Bash(curl -s http://localhost:5002/sync/status)",
+      "Bash(curl -s http://localhost:5002/entries)",
+      "Bash(curl -s -X POST http://localhost:5002/entries -H \"Content-Type: application/json\" -d '{\"station_id\":\"ST01\",\"plant_id\":1,\"entry_date\":\"2026-04-14\",\"shift\":\"A\",\"item_id\":42,\"pack_config_id\":7,\"num_bags\":50,\"weight\":25.45}')",
+      "Bash(curl -s http://localhost:5002/entries/58ac7858-c0b2-4ef7-be89-4398e4a3c41e)",
+      "Bash(curl -s -X POST http://localhost:5002/entries -H \"Content-Type: application/json\" -d '{\"station_id\":\"ST01\"}')",
+      "Bash(curl -s http://localhost:5002/entries/nonexistent)",
+      "Bash(curl -s -X POST http://localhost:5002/entries -H \"Content-Type: application/json\" -d '{\"station_id\":\"ST01\",\"plant_id\":1,\"entry_date\":\"2026-04-14\",\"item_id\":42,\"pack_config_id\":7,\"num_bags\":10}')",
+      "Bash(SIMULATE_SERIAL=true npx tsx weight-service/src/index.ts)",
+      "Bash(curl -s http://localhost:5000/weight)"
+    ]
+  }
+}

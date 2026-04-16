@@ -1,0 +1,49 @@
+import { config as dotenvConfig } from 'dotenv';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Load .env from project root
+dotenvConfig({ path: resolve(__dirname, '../../.env') });
+
+export interface SyncServiceConfig {
+  stationId: string;
+  plantId: string;
+  apiPort: number;
+  logLevel: string;
+  dbPath: string;
+
+  // Django server
+  djangoServerUrl: string;
+  djangoApiToken: string;
+
+  // Sync timers
+  syncRetryIntervalMs: number;
+  masterSyncIntervalMs: number;
+  syncPushTimeoutMs: number;
+
+  // Offline fallback — day_seq range for QR codes when Django is unreachable
+  offlineDaySeqStart: number;
+  offlineDaySeqEnd: number;
+}
+
+const config: SyncServiceConfig = Object.freeze({
+  stationId: process.env.STATION_ID || 'ST01',
+  plantId: process.env.PLANT_ID || 'A1',
+  apiPort: parseInt(process.env.SYNC_API_PORT || '5002', 10),
+  logLevel: process.env.LOG_LEVEL || 'info',
+  dbPath: process.env.DB_PATH || resolve(__dirname, '../data/fg_production.db'),
+
+  djangoServerUrl: process.env.DJANGO_SERVER_URL || 'http://127.0.0.1:8000',
+  djangoApiToken: process.env.DJANGO_API_TOKEN || '5b6adcee11d92c2d24144253644458527a61c5a954ffd355e11484597fe7d326',
+
+  syncRetryIntervalMs: parseInt(process.env.SYNC_RETRY_INTERVAL_MS || '60000', 10),
+  masterSyncIntervalMs: parseInt(process.env.MASTER_SYNC_INTERVAL_MS || '3600000', 10),
+  syncPushTimeoutMs: parseInt(process.env.SYNC_PUSH_TIMEOUT_MS || '10000', 10),
+
+  offlineDaySeqStart: parseInt(process.env.OFFLINE_DAY_SEQ_START || '90', 10),
+  offlineDaySeqEnd: parseInt(process.env.OFFLINE_DAY_SEQ_END || '99', 10),
+});
+
+export default config;

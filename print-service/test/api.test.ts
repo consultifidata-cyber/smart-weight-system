@@ -30,7 +30,17 @@ class MockDriver implements PrinterDriver {
     }
   }
 
+  async sendWin(commands: Buffer): Promise<void> {
+    if (this.sendError) {
+      throw new Error(this.sendError);
+    }
+  }
+
   async healthCheck(): Promise<boolean> {
+    return this.healthy;
+  }
+
+  async healthCheckWin(): Promise<boolean> {
     return this.healthy;
   }
 }
@@ -38,8 +48,9 @@ class MockDriver implements PrinterDriver {
 const mockConfig: PrinterConfig = {
   driver: 'tspl',
   device: '/dev/usb/lp0',
+  printerName: 'SNBC TVSE LP 46 NEO BPLE',
   labelWidth: 50,
-  labelHeight: 30,
+  labelHeight: 50,
   dpi: 203,
   stationId: 'ST01',
   apiPort: 5001,
@@ -47,16 +58,18 @@ const mockConfig: PrinterConfig = {
 };
 
 describe('Print API', () => {
-  it('POST /print returns 200 on success', async () => {
+  it('POST /print/print returns 200 on success', async () => {
     const driver = new MockDriver();
     const app = createServer(driver, mockConfig);
 
     const res = await request(app)
-      .post('/print')
+      .post('/print/print')
       .send({
         product: 'FG-White-Cement-50kg',
         weight: 25.45,
         stationId: 'ST01',
+        line1: 'FG-WC-150426-01-001',
+        line2: 'FG-White-Cement-50kg | 25.45 kg',
       });
 
     assert.equal(res.status, 200);
@@ -65,15 +78,15 @@ describe('Print API', () => {
     assert.ok(res.body.printedAt);
   });
 
-  it('POST /print validates required fields', async () => {
+  it('POST /print/print validates required fields', async () => {
     const driver = new MockDriver();
     const app = createServer(driver, mockConfig);
 
     const res = await request(app)
-      .post('/print')
+      .post('/print/print')
       .send({
         product: 'FG-White-Cement-50kg',
-        // missing weight and stationId
+        // missing weight, stationId, line1, line2
       });
 
     assert.equal(res.status, 400);
@@ -81,37 +94,41 @@ describe('Print API', () => {
     assert.match(res.body.error, /required fields/i);
   });
 
-  it('POST /print rejects duplicate requests within 2s', async () => {
+  it('POST /print/print rejects duplicate requests within 2s', async () => {
     const driver = new MockDriver();
     const app = createServer(driver, mockConfig);
 
     const payload = {
-      product: 'FG-White-Cement-50kg',
-      weight: 25.45,
+      product: 'FG-Dedup-Test',
+      weight: 99.99,
       stationId: 'ST01',
+      line1: 'DEDUP-150426-01-001',
+      line2: 'FG-Dedup-Test | 99.99 kg',
     };
 
-    const res1 = await request(app).post('/print').send(payload);
+    const res1 = await request(app).post('/print/print').send(payload);
     assert.equal(res1.status, 200);
     assert.equal(res1.body.status, 'ok');
 
     // Second request immediately after
-    const res2 = await request(app).post('/print').send(payload);
+    const res2 = await request(app).post('/print/print').send(payload);
     assert.equal(res2.status, 429);
     assert.equal(res2.body.status, 'error');
     assert.match(res2.body.error, /duplicate/i);
   });
 
-  it('POST /print accepts custom QR content', async () => {
+  it('POST /print/print accepts custom QR content', async () => {
     const driver = new MockDriver();
     const app = createServer(driver, mockConfig);
 
     const res = await request(app)
-      .post('/print')
+      .post('/print/print')
       .send({
-        product: 'FG-White-Cement-50kg',
-        weight: 25.45,
+        product: 'FG-Custom-QR',
+        weight: 30.00,
         stationId: 'ST01',
+        line1: 'CQRT-150426-01-001',
+        line2: 'FG-Custom-QR | 30.00 kg',
         qrContent: 'CUSTOM_QR_CONTENT',
       });
 
@@ -119,16 +136,18 @@ describe('Print API', () => {
     assert.equal(res.body.status, 'ok');
   });
 
-  it('POST /print accepts custom label dimensions', async () => {
+  it('POST /print/print accepts custom label dimensions', async () => {
     const driver = new MockDriver();
     const app = createServer(driver, mockConfig);
 
     const res = await request(app)
-      .post('/print')
+      .post('/print/print')
       .send({
-        product: 'FG-White-Cement-50kg',
-        weight: 25.45,
+        product: 'FG-Custom-Label',
+        weight: 40.00,
         stationId: 'ST01',
+        line1: 'CLBL-150426-01-001',
+        line2: 'FG-Custom-Label | 40.00 kg',
         labelWidth: 80,
         labelHeight: 50,
       });
@@ -137,16 +156,18 @@ describe('Print API', () => {
     assert.equal(res.body.status, 'ok');
   });
 
-  it('POST /print returns 503 on printer error', async () => {
+  it('POST /print/print returns 503 on printer error', async () => {
     const driver = new MockDriver({ sendError: 'Device not found' });
     const app = createServer(driver, mockConfig);
 
     const res = await request(app)
-      .post('/print')
+      .post('/print/print')
       .send({
-        product: 'FG-White-Cement-50kg',
-        weight: 25.45,
+        product: 'FG-Printer-Error',
+        weight: 50.00,
         stationId: 'ST01',
+        line1: 'PERR-150426-01-001',
+        line2: 'FG-Printer-Error | 50.00 kg',
       });
 
     assert.equal(res.status, 503);

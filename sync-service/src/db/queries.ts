@@ -1,0 +1,540 @@
+import type Database from 'better-sqlite3';
+import type {
+  FGEntry,
+  FGEntryLine,
+  FGEntryWithLines,
+  FGSession,
+  FGBag,
+  FGSessionWithBags,
+  SyncStatus,
+  FGPackConfig,
+  ItemMaster,
+  ProductForDropdown,
+} from '../types.js';
+
+export class Queries {
+  private db: Database.Database;
+
+  // ── Legacy entry statements ──
+  private _insertEntry!: Database.Statement;
+  private _insertLine!: Database.Statement;
+  private _getEntry!: Database.Statement;
+  private _getLinesByEntry!: Database.Statement;
+  private _updateSyncStatus!: Database.Statement;
+  private _updateSyncSuccess!: Database.Statement;
+  private _listPending!: Database.Statement;
+  private _countByStatus!: Database.Statement;
+  private _countSyncedToday!: Database.Statement;
+
+  // ── Master data statements ──
+  private _getProducts!: Database.Statement;
+  private _getMeta!: Database.Statement;
+  private _upsertMeta!: Database.Statement;
+
+  // ── Session statements ──
+  private _insertSession!: Database.Statement;
+  private _getSession!: Database.Statement;
+  private _getOpenSession!: Database.Statement;
+  private _updateSessionOnline!: Database.Statement;
+  private _updateSessionStatus!: Database.Statement;
+  private _updateSessionSyncStatus!: Database.Statement;
+  private _updateSessionSynced!: Database.Statement;
+  private _updateSessionClosed!: Database.Statement;
+  private _listPendingSessions!: Database.Statement;
+  private _countSessionsByStatus!: Database.Statement;
+  private _countClosedSessionsToday!: Database.Statement;
+
+  // ── Auto-session statements ──
+  private _findOpenSessionForPack!: Database.Statement;
+  private _getNextDaySeq!: Database.Statement;
+  private _incrementDaySeq!: Database.Statement;
+  private _listOpenSessions!: Database.Statement;
+  private _closeStaleSessionsForDate!: Database.Statement;
+  private _listStaleOpenSessions!: Database.Statement;
+
+  // ── Bag statements ──
+  private _insertBag!: Database.Statement;
+  private _getBagsBySession!: Database.Statement;
+  private _getNextBagNumber!: Database.Statement;
+  private _updateBagSynced!: Database.Statement;
+  private _countBagsToday!: Database.Statement;
+
+  constructor(db: Database.Database) {
+    this.db = db;
+    this.prepareStatements();
+  }
+
+  private prepareStatements(): void {
+    // ── Legacy entry statements ──────────────────────────────────────────
+    this._insertEntry = this.db.prepare(`
+      INSERT INTO fg_entry (
+        local_entry_id, station_id, plant_id, entry_date, shift,
+        production_run_id, created_by, created_at, idempotency_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this._insertLine = this.db.prepare(`
+      INSERT INTO fg_entry_line (
+        local_entry_id, item_id, pack_config_id, offer_id,
+        num_bags, base_uom, batch_no, note
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this._getEntry = this.db.prepare(
+      `SELECT * FROM fg_entry WHERE local_entry_id = ?`
+    );
+
+    this._getLinesByEntry = this.db.prepare(
+      `SELECT * FROM fg_entry_line WHERE local_entry_id = ?`
+    );
+
+    this._updateSyncStatus = this.db.prepare(`
+      UPDATE fg_entry
+      SET sync_status = ?, sync_attempts = sync_attempts + 1,
+          last_sync_error = ?, last_sync_at = datetime('now')
+      WHERE local_entry_id = ?
+    `);
+
+    this._updateSyncSuccess = this.db.prepare(`
+      UPDATE fg_entry
+      SET sync_status = 'SYNCED', server_prod_no = ?, server_doc_id = ?,
+          last_sync_error = NULL, last_sync_at = datetime('now')
+      WHERE local_entry_id = ?
+    `);
+
+    this._listPending = this.db.prepare(`
+      SELECT * FROM fg_entry
+      WHERE sync_status = 'PENDING'
+      ORDER BY created_at ASC
+      LIMIT ?
+    `);
+
+    this._countByStatus = this.db.prepare(
+      `SELECT sync_status, COUNT(*) as count FROM fg_entry GROUP BY sync_status`
+    );
+
+    this._countSyncedToday = this.db.prepare(
+      `SELECT COUNT(*) as count FROM fg_entry WHERE sync_status = 'SYNCED' AND entry_date = ?`
+    );
+
+    // ── Master data statements ───────────────────────────────────────────
+    this._getProducts = this.db.prepare(`
+      SELECT
+        p.pack_id, p.item_id, p.pack_name AS name, p.pack_name,
+        p.net_weight_gm, p.pcs_per_bag, p.bag_type, p.mrp
+      FROM fg_pack_config p
+      ORDER BY p.pack_name
+    `);
+
+    this._getMeta = this.db.prepare(
+      `SELECT value FROM sync_meta WHERE key = ?`
+    );
+
+    this._upsertMeta = this.db.prepare(`
+      INSERT INTO sync_meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `);
+
+    // ── Session statements ───────────────────────────────────────────────
+    this._insertSession = this.db.prepare(`
+      INSERT INTO fg_session (
+        session_id, doc_id, prod_no, day_seq, station_id, plant_id,
+        entry_date, shift, item_id, pack_config_id, pack_name,
+        status, is_offline, idempotency_key, created_at, sync_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this._getSession = this.db.prepare(
+      `SELECT * FROM fg_session WHERE session_id = ?`
+    );
+
+    this._getOpenSession = this.db.prepare(
+      `SELECT * FROM fg_session WHERE station_id = ? AND status = 'OPEN' LIMIT 1`
+    );
+
+    this._updateSessionOnline = this.db.prepare(`
+      UPDATE fg_session
+      SET doc_id = ?, prod_no = ?, day_seq = ?, is_offline = 0, sync_status = 'SYNCED'
+      WHERE session_id = ?
+    `);
+
+    this._updateSessionStatus = this.db.prepare(
+      `UPDATE fg_session SET status = ? WHERE session_id = ?`
+    );
+
+    this._updateSessionSyncStatus = this.db.prepare(`
+      UPDATE fg_session
+      SET sync_status = ?, sync_attempts = sync_attempts + 1,
+          sync_error = ?, last_sync_at = datetime('now')
+      WHERE session_id = ?
+    `);
+
+    this._updateSessionSynced = this.db.prepare(`
+      UPDATE fg_session
+      SET sync_status = 'SYNCED', doc_id = ?, prod_no = ?,
+          sync_error = NULL, last_sync_at = datetime('now')
+      WHERE session_id = ?
+    `);
+
+    this._updateSessionClosed = this.db.prepare(`
+      UPDATE fg_session
+      SET status = 'CLOSED', closed_at = datetime('now')
+      WHERE session_id = ?
+    `);
+
+    this._listPendingSessions = this.db.prepare(`
+      SELECT * FROM fg_session
+      WHERE sync_status = 'PENDING'
+      ORDER BY created_at ASC
+      LIMIT ?
+    `);
+
+    this._countSessionsByStatus = this.db.prepare(
+      `SELECT status, COUNT(*) as count FROM fg_session GROUP BY status`
+    );
+
+    this._countClosedSessionsToday = this.db.prepare(
+      `SELECT COUNT(*) as count FROM fg_session WHERE status = 'CLOSED' AND entry_date = ?`
+    );
+
+    // ── Auto-session statements ────────────────────────────────────────
+    this._findOpenSessionForPack = this.db.prepare(`
+      SELECT * FROM fg_session
+      WHERE station_id = ? AND pack_config_id = ? AND entry_date = ? AND status = 'OPEN'
+      LIMIT 1
+    `);
+
+    this._getNextDaySeq = this.db.prepare(`
+      INSERT INTO day_seq_counter (station_id, entry_date, next_seq)
+      VALUES (?, ?, 1)
+      ON CONFLICT(station_id, entry_date) DO UPDATE SET next_seq = next_seq + 1
+      RETURNING next_seq
+    `);
+
+    this._incrementDaySeq = this.db.prepare(`
+      UPDATE day_seq_counter SET next_seq = next_seq + 1
+      WHERE station_id = ? AND entry_date = ?
+    `);
+
+    this._listOpenSessions = this.db.prepare(
+      `SELECT * FROM fg_session WHERE station_id = ? AND status = 'OPEN' ORDER BY created_at ASC`
+    );
+
+    this._closeStaleSessionsForDate = this.db.prepare(`
+      UPDATE fg_session
+      SET status = 'CLOSED', closed_at = datetime('now'), sync_status = 'PENDING'
+      WHERE station_id = ? AND status = 'OPEN' AND entry_date < ?
+    `);
+
+    this._listStaleOpenSessions = this.db.prepare(`
+      SELECT * FROM fg_session
+      WHERE station_id = ? AND status = 'OPEN' AND entry_date < ?
+      ORDER BY created_at ASC
+    `);
+
+    // ── Bag statements ───────────────────────────────────────────────────
+    this._insertBag = this.db.prepare(`
+      INSERT INTO fg_bag (
+        bag_id, session_id, bag_number, item_id, pack_config_id,
+        offer_id, actual_weight_gm, qr_code, batch_no, note,
+        line_id, synced, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this._getBagsBySession = this.db.prepare(
+      `SELECT * FROM fg_bag WHERE session_id = ? ORDER BY bag_number ASC`
+    );
+
+    this._getNextBagNumber = this.db.prepare(
+      `SELECT COALESCE(MAX(bag_number), 0) + 1 AS next FROM fg_bag WHERE session_id = ?`
+    );
+
+    this._updateBagSynced = this.db.prepare(
+      `UPDATE fg_bag SET synced = 1, line_id = ? WHERE bag_id = ?`
+    );
+
+    this._countBagsToday = this.db.prepare(
+      `SELECT COUNT(*) as count FROM fg_bag b JOIN fg_session s ON b.session_id = s.session_id WHERE s.entry_date = ?`
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Legacy entry operations (kept for backward compat)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  insertEntry(entry: FGEntry, lines: FGEntryLine[]): void {
+    this.db.transaction(() => {
+      this._insertEntry.run(
+        entry.local_entry_id, entry.station_id, entry.plant_id,
+        entry.entry_date, entry.shift, entry.production_run_id,
+        entry.created_by, entry.created_at, entry.idempotency_key,
+      );
+      for (const line of lines) {
+        this._insertLine.run(
+          line.local_entry_id, line.item_id, line.pack_config_id,
+          line.offer_id, line.num_bags, line.base_uom, line.batch_no, line.note,
+        );
+      }
+    })();
+  }
+
+  getEntry(localEntryId: string): FGEntry | undefined {
+    return this._getEntry.get(localEntryId) as FGEntry | undefined;
+  }
+
+  getEntryWithLines(localEntryId: string): FGEntryWithLines | undefined {
+    const entry = this.getEntry(localEntryId);
+    if (!entry) return undefined;
+    const lines = this._getLinesByEntry.all(localEntryId) as FGEntryLine[];
+    return { ...entry, lines };
+  }
+
+  listEntries(options: {
+    date?: string;
+    status?: SyncStatus;
+    limit?: number;
+  } = {}): { entries: FGEntry[]; total: number; pending_count: number } {
+    const conditions: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (options.date) {
+      conditions.push('entry_date = ?');
+      params.push(options.date);
+    }
+    if (options.status) {
+      conditions.push('sync_status = ?');
+      params.push(options.status);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = options.limit || 50;
+
+    const entries = this.db.prepare(
+      `SELECT * FROM fg_entry ${where} ORDER BY created_at DESC LIMIT ?`
+    ).all(...params, limit) as FGEntry[];
+
+    const totalRow = this.db.prepare(
+      `SELECT COUNT(*) as count FROM fg_entry ${where}`
+    ).get(...params) as { count: number };
+
+    const pendingRow = this.db.prepare(
+      `SELECT COUNT(*) as count FROM fg_entry WHERE sync_status = 'PENDING'`
+    ).get() as { count: number };
+
+    return { entries, total: totalRow.count, pending_count: pendingRow.count };
+  }
+
+  listPending(limit: number = 50): FGEntry[] {
+    return this._listPending.all(limit) as FGEntry[];
+  }
+
+  updateSyncStatus(localEntryId: string, status: SyncStatus, error: string | null): void {
+    this._updateSyncStatus.run(status, error, localEntryId);
+  }
+
+  updateSyncSuccess(localEntryId: string, serverProdNo: string, serverDocId: number): void {
+    this._updateSyncSuccess.run(serverProdNo, serverDocId, localEntryId);
+  }
+
+  getStatusCounts(): Record<string, number> {
+    const rows = this._countByStatus.all() as { sync_status: string; count: number }[];
+    const result: Record<string, number> = { PENDING: 0, SYNCING: 0, SYNCED: 0, FAILED: 0 };
+    for (const row of rows) {
+      result[row.sync_status] = row.count;
+    }
+    return result;
+  }
+
+  countSyncedToday(date: string): number {
+    const row = this._countSyncedToday.get(date) as { count: number };
+    return row.count;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Session operations (bag-by-bag)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  insertSession(session: FGSession): void {
+    this._insertSession.run(
+      session.session_id, session.doc_id, session.prod_no, session.day_seq,
+      session.station_id, session.plant_id, session.entry_date, session.shift,
+      session.item_id, session.pack_config_id, session.pack_name,
+      session.status, session.is_offline, session.idempotency_key,
+      session.created_at, session.sync_status,
+    );
+  }
+
+  getSession(sessionId: string): FGSession | undefined {
+    return this._getSession.get(sessionId) as FGSession | undefined;
+  }
+
+  getSessionWithBags(sessionId: string): FGSessionWithBags | undefined {
+    const session = this.getSession(sessionId);
+    if (!session) return undefined;
+    const bags = this._getBagsBySession.all(sessionId) as FGBag[];
+    return { ...session, bags };
+  }
+
+  getOpenSession(stationId: string): FGSession | undefined {
+    return this._getOpenSession.get(stationId) as FGSession | undefined;
+  }
+
+  updateSessionOnline(sessionId: string, docId: number, prodNo: string, daySeq: number): void {
+    this._updateSessionOnline.run(docId, prodNo, daySeq, sessionId);
+  }
+
+  updateSessionStatus(sessionId: string, status: string): void {
+    this._updateSessionStatus.run(status, sessionId);
+  }
+
+  updateSessionSyncStatus(sessionId: string, syncStatus: SyncStatus, error: string | null): void {
+    this._updateSessionSyncStatus.run(syncStatus, error, sessionId);
+  }
+
+  updateSessionSynced(sessionId: string, docId: number, prodNo: string): void {
+    this._updateSessionSynced.run(docId, prodNo, sessionId);
+  }
+
+  updateSessionClosed(sessionId: string): void {
+    this._updateSessionClosed.run(sessionId);
+  }
+
+  listPendingSessions(limit: number = 20): FGSession[] {
+    return this._listPendingSessions.all(limit) as FGSession[];
+  }
+
+  countClosedSessionsToday(date: string): number {
+    const row = this._countClosedSessionsToday.get(date) as { count: number };
+    return row.count;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Auto-session operations (bag-first multi-product flow)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Find an existing OPEN session for this station + pack_config + date */
+  findOpenSessionForPack(stationId: string, packConfigId: number, entryDate: string): FGSession | undefined {
+    return this._findOpenSessionForPack.get(stationId, packConfigId, entryDate) as FGSession | undefined;
+  }
+
+  /** Allocate the next day_seq for this station + date (auto-incrementing) */
+  getNextDaySeq(stationId: string, entryDate: string): number {
+    const row = this._getNextDaySeq.get(stationId, entryDate) as { next_seq: number };
+    return row.next_seq;
+  }
+
+  /** List all OPEN sessions for a station */
+  listOpenSessions(stationId: string): FGSession[] {
+    return this._listOpenSessions.all(stationId) as FGSession[];
+  }
+
+  /** List stale OPEN sessions (entry_date < today) for closing */
+  listStaleOpenSessions(stationId: string, today: string): FGSession[] {
+    return this._listStaleOpenSessions.all(stationId, today) as FGSession[];
+  }
+
+  /** Close all OPEN sessions from dates before today, mark PENDING for sync */
+  closeStaleSessionsForDate(stationId: string, today: string): number {
+    const result = this._closeStaleSessionsForDate.run(stationId, today);
+    return result.changes;
+  }
+
+  /** Close a single session and mark it PENDING for sync */
+  closeAndMarkPending(sessionId: string): void {
+    this.db.transaction(() => {
+      this._updateSessionClosed.run(sessionId);
+      this._updateSessionSyncStatus.run('PENDING', null, sessionId);
+    })();
+  }
+
+  /** Get today's bag summary grouped by pack_config for display */
+  getBagsSummaryToday(stationId: string, date: string): Array<{ pack_config_id: number; pack_name: string; count: number }> {
+    const rows = this.db.prepare(`
+      SELECT s.pack_config_id, s.pack_name, COUNT(b.bag_id) as count
+      FROM fg_session s
+      JOIN fg_bag b ON b.session_id = s.session_id
+      WHERE s.station_id = ? AND s.entry_date = ?
+      GROUP BY s.pack_config_id, s.pack_name
+      ORDER BY s.pack_name
+    `).all(stationId, date) as Array<{ pack_config_id: number; pack_name: string; count: number }>;
+    return rows;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Bag operations
+  // ══════════════════════════════════════════════════════════════════════════
+
+  insertBag(bag: FGBag): void {
+    this._insertBag.run(
+      bag.bag_id, bag.session_id, bag.bag_number,
+      bag.item_id, bag.pack_config_id, bag.offer_id,
+      bag.actual_weight_gm, bag.qr_code, bag.batch_no, bag.note,
+      bag.line_id, bag.synced, bag.created_at,
+    );
+  }
+
+  getBagsBySession(sessionId: string): FGBag[] {
+    return this._getBagsBySession.all(sessionId) as FGBag[];
+  }
+
+  getNextBagNumber(sessionId: string): number {
+    const row = this._getNextBagNumber.get(sessionId) as { next: number };
+    return row.next;
+  }
+
+  updateBagSynced(bagId: string, lineId: number): void {
+    this._updateBagSynced.run(lineId, bagId);
+  }
+
+  countBagsToday(date: string): number {
+    const row = this._countBagsToday.get(date) as { count: number };
+    return row.count;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Master data operations
+  // ══════════════════════════════════════════════════════════════════════════
+
+  getProducts(): ProductForDropdown[] {
+    return this._getProducts.all() as ProductForDropdown[];
+  }
+
+  replacePackConfigs(configs: FGPackConfig[]): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM fg_pack_config').run();
+      const insert = this.db.prepare(`
+        INSERT INTO fg_pack_config (pack_id, item_id, pack_name, net_weight_gm, pcs_per_bag, bag_type, mrp, ptr, ptd)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const c of configs) {
+        insert.run(c.pack_id, c.item_id, c.pack_name, c.net_weight_gm, c.pcs_per_bag, c.bag_type, c.mrp, c.ptr, c.ptd);
+      }
+    })();
+  }
+
+  replaceItemMasters(items: ItemMaster[]): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM item_master').run();
+      const insert = this.db.prepare(`
+        INSERT INTO item_master (item_id, item_name, item_code, uom, category)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      for (const i of items) {
+        insert.run(i.item_id, i.item_name, i.item_code, i.uom, i.category);
+      }
+    })();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Sync metadata
+  // ══════════════════════════════════════════════════════════════════════════
+
+  getMeta(key: string): string | null {
+    const row = this._getMeta.get(key) as { value: string } | undefined;
+    return row ? row.value : null;
+  }
+
+  setMeta(key: string, value: string): void {
+    this._upsertMeta.run(key, value);
+  }
+}
