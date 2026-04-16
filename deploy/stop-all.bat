@@ -1,14 +1,14 @@
 @echo off
 :: ============================================================
-:: Smart Weight System — Stop All Services
+:: Smart Weight System -- Stop All Services
 :: ============================================================
 
-title Smart Weight System — Stopping...
+title Smart Weight System -- Stopping...
 
 cd /d "%~dp0.."
 
 echo.
-echo  Smart Weight System — Stopping Services
+echo  Smart Weight System -- Stopping Services
 echo  ========================================
 
 where pm2 >nul 2>&1

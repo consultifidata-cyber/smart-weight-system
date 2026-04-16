@@ -1,8 +1,8 @@
 # ============================================================
-# Smart Weight System — Station Installer (PowerShell)
+# Smart Weight System -- Station Installer (PowerShell)
 # ============================================================
 # Run as Administrator:
-#   Right-click PowerShell → "Run as administrator"
+#   Right-click PowerShell -> "Run as administrator"
 #   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 #   cd C:\smart-weight-system
 #   .\deploy\install.ps1
@@ -26,7 +26,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ── Colours and helpers ──────────────────────────────────────
+# -- Colours and helpers --------------------------------------
 
 function Write-Step($num, $msg) {
     Write-Host ""
@@ -43,11 +43,11 @@ function Test-Command($cmd) {
     catch { return $false }
 }
 
-# ── Banner ───────────────────────────────────────────────────
+# -- Banner ---------------------------------------------------
 
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor White
-Write-Host "  Smart Weight System — Station Installer" -ForegroundColor White
+Write-Host "  Smart Weight System -- Station Installer" -ForegroundColor White
 Write-Host "  ================================================" -ForegroundColor White
 Write-Host ""
 
@@ -55,7 +55,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $repoRoot) { $repoRoot = (Get-Location).Path }
 Write-Host "  Repo root: $repoRoot" -ForegroundColor DarkGray
 
-# ── Step 1: Prerequisite Check ───────────────────────────────
+# -- Step 1: Prerequisite Check -------------------------------
 
 if (-not $SkipPrereqs) {
     Write-Step "1/9" "Checking prerequisites"
@@ -107,7 +107,7 @@ if (-not $SkipPrereqs) {
     Write-Host "  Skipping prerequisite check (--SkipPrereqs)" -ForegroundColor DarkGray
 }
 
-# ── Step 2: Install PM2 Globally ─────────────────────────────
+# -- Step 2: Install PM2 Globally -----------------------------
 
 Write-Step "2/9" "Installing PM2 globally"
 
@@ -124,7 +124,7 @@ if (Test-Command "pm2") {
     Write-Ok "PM2 installed"
 }
 
-# ── Step 3: Station Configuration ────────────────────────────
+# -- Step 3: Station Configuration ----------------------------
 
 Write-Step "3/9" "Station configuration"
 
@@ -164,7 +164,7 @@ if (Test-Path $envFile) {
         if (-not $djangoToken)  { $djangoToken = "CHANGE_ME" }
 
         # Read template and replace placeholders.
-        # Escape '$' in user values — PowerShell -replace treats '$' in the
+        # Escape '$' in user values -- PowerShell -replace treats '$' in the
         # replacement string as a regex back-reference ($1, $&, etc.), which
         # silently mangles tokens or URLs that contain '$'.
         function Safe-Replace($content, $placeholder, $value) {
@@ -190,7 +190,7 @@ if (Test-Path $envFile) {
     }
 }
 
-# ── Step 4: Install npm Dependencies ─────────────────────────
+# -- Step 4: Install npm Dependencies -------------------------
 
 Write-Step "4/9" "Installing npm dependencies"
 
@@ -204,7 +204,7 @@ if ($LASTEXITCODE -ne 0) {
 Pop-Location
 Write-Ok "Dependencies installed"
 
-# ── Step 5: Create Logs Directory ─────────────────────────────
+# -- Step 5: Create Logs Directory -----------------------------
 
 Write-Step "5/9" "Creating logs directory"
 
@@ -216,7 +216,7 @@ if (-not (Test-Path $logsDir)) {
     Write-Ok "Logs directory already exists"
 }
 
-# ── Step 6: Start Services via PM2 ───────────────────────────
+# -- Step 6: Start Services via PM2 ---------------------------
 
 Write-Step "6/9" "Starting services via PM2"
 
@@ -242,7 +242,7 @@ Start-Sleep -Seconds 5
 
 pm2 status
 
-# ── Step 7: Configure Auto-Start on Boot ─────────────────────
+# -- Step 7: Configure Auto-Start on Boot ---------------------
 
 Write-Step "7/9" "Configuring auto-start on Windows boot"
 
@@ -259,7 +259,7 @@ try {
     $shortcut = $WshShell.CreateShortcut($startupFolder)
     $shortcut.TargetPath = $startAllBat
     $shortcut.WorkingDirectory = $repoRoot
-    $shortcut.Description = "Smart Weight System — Auto Start"
+    $shortcut.Description = "Smart Weight System -- Auto Start"
     $shortcut.WindowStyle = 7  # Minimized
     $shortcut.Save()
     Write-Ok "Startup shortcut created at: $startupFolder"
@@ -267,10 +267,10 @@ try {
 } catch {
     Write-Warn "Could not create startup shortcut: $_"
     Write-Host "  Manual alternative: Place a shortcut to deploy\start-all.bat in:" -ForegroundColor Yellow
-    Write-Host "  shell:startup (Win+R → shell:startup)" -ForegroundColor Yellow
+    Write-Host "  shell:startup (Win+R -> shell:startup)" -ForegroundColor Yellow
 }
 
-# ── Step 8: Create Desktop Shortcut ──────────────────────────
+# -- Step 8: Create Desktop Shortcut --------------------------
 
 Write-Step "8/9" "Creating desktop shortcut"
 
@@ -291,14 +291,14 @@ IconIndex=0
     Write-Warn "Could not create desktop shortcut: $_"
 }
 
-# ── Step 9: Open Browser ─────────────────────────────────────
+# -- Step 9: Open Browser -------------------------------------
 
 Write-Step "9/9" "Opening web-ui in browser"
 
 Start-Process "http://localhost:3000"
 Write-Ok "Browser launched"
 
-# ── Summary ──────────────────────────────────────────────────
+# -- Summary --------------------------------------------------
 
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Green
@@ -311,9 +311,9 @@ Write-Host "  Print API:    http://localhost:5001/health" -ForegroundColor White
 Write-Host "  Sync API:     http://localhost:5002/health" -ForegroundColor White
 Write-Host ""
 Write-Host "  Useful commands:" -ForegroundColor DarkGray
-Write-Host "    pm2 status           — Check service status" -ForegroundColor DarkGray
-Write-Host "    pm2 logs             — View live logs" -ForegroundColor DarkGray
-Write-Host "    pm2 restart all      — Restart all services" -ForegroundColor DarkGray
-Write-Host "    deploy\health-check.bat — Full health check" -ForegroundColor DarkGray
-Write-Host "    deploy\update.bat    — Pull latest + restart" -ForegroundColor DarkGray
+Write-Host "    pm2 status           -- Check service status" -ForegroundColor DarkGray
+Write-Host "    pm2 logs             -- View live logs" -ForegroundColor DarkGray
+Write-Host "    pm2 restart all      -- Restart all services" -ForegroundColor DarkGray
+Write-Host "    deploy\health-check.bat -- Full health check" -ForegroundColor DarkGray
+Write-Host "    deploy\update.bat    -- Pull latest + restart" -ForegroundColor DarkGray
 Write-Host ""

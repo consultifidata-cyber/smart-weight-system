@@ -1,18 +1,18 @@
 @echo off
 :: ============================================================
-:: Smart Weight System — Start All Services
+:: Smart Weight System -- Start All Services
 :: ============================================================
 :: Double-click or run from cmd to start all 4 services via PM2.
 :: After starting, opens the web-ui in the default browser.
 :: ============================================================
 
-title Smart Weight System — Starting...
+title Smart Weight System -- Starting...
 
 :: Navigate to repo root (one level up from deploy/)
 cd /d "%~dp0.."
 
 echo.
-echo  Smart Weight System — Starting Services
+echo  Smart Weight System -- Starting Services
 echo  ========================================
 
 :: Check if PM2 is available

@@ -1,17 +1,17 @@
 @echo off
 :: ============================================================
-:: Smart Weight System — Health Check
+:: Smart Weight System -- Health Check
 :: ============================================================
 :: Checks all 4 services and reports status.
 :: Use this to quickly diagnose issues.
 :: ============================================================
 
-title Smart Weight System — Health Check
+title Smart Weight System -- Health Check
 
 cd /d "%~dp0.."
 
 echo.
-echo  Smart Weight System — Health Check
+echo  Smart Weight System -- Health Check
 echo  ========================================
 echo.
 
@@ -33,29 +33,29 @@ echo  -------------------------
 
 where curl >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo  [WARN] curl.exe not found — cannot check HTTP endpoints.
+    echo  [WARN] curl.exe not found -- cannot check HTTP endpoints.
     echo         Install curl or upgrade to a recent Windows 10/11 build.
     goto :skip_http
 )
 
 echo.
 echo  Weight Service (port 5000):
-curl -s -o nul -w "  HTTP %%{http_code} — %%{time_total}s" http://localhost:5000/health 2>nul
+curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:5000/health 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
 
 echo.
 echo  Print Service (port 5001):
-curl -s -o nul -w "  HTTP %%{http_code} — %%{time_total}s" http://localhost:5001/health 2>nul
+curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:5001/health 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
 
 echo.
 echo  Sync Service (port 5002):
-curl -s -o nul -w "  HTTP %%{http_code} — %%{time_total}s" http://localhost:5002/health 2>nul
+curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:5002/health 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
 
 echo.
 echo  Web UI (port 3000):
-curl -s -o nul -w "  HTTP %%{http_code} — %%{time_total}s" http://localhost:3000/ 2>nul
+curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:3000/ 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
 
 :skip_http
@@ -71,7 +71,7 @@ echo.
 
 :: Recent PM2 logs (last 10 lines per service)
 echo.
-echo  [Recent Errors — last 5 lines per service]
+echo  [Recent Errors -- last 5 lines per service]
 echo  -------------------------------------------
 where pm2 >nul 2>&1
 if %ERRORLEVEL% equ 0 (

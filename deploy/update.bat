@@ -1,17 +1,17 @@
 @echo off
 :: ============================================================
-:: Smart Weight System — Pull Latest Code and Restart
+:: Smart Weight System -- Pull Latest Code and Restart
 :: ============================================================
 :: Pulls latest from GitHub, installs dependencies, restarts.
 :: Run this when a new version is available.
 :: ============================================================
 
-title Smart Weight System — Updating...
+title Smart Weight System -- Updating...
 
 cd /d "%~dp0.."
 
 echo.
-echo  Smart Weight System — Update
+echo  Smart Weight System -- Update
 echo  ========================================
 
 :: Check prerequisites

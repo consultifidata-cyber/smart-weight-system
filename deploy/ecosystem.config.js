@@ -1,5 +1,5 @@
 /**
- * PM2 Ecosystem Config — Smart Weight System
+ * PM2 Ecosystem Config -- Smart Weight System
  *
  * All 4 services managed by PM2 for auto-restart, log rotation, and boot persistence.
  * Usage:
