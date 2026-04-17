@@ -9,7 +9,6 @@ var CONFIG = {
   autoResetMs: 2000,
   fetchTimeoutMs: 3000,
   plantCode: 'BNJRS10',
-  weightTolerancePct: 0.20,   // ±20% weight deviation triggers confirmation
 };
 
 
@@ -24,5 +23,4 @@ var CONFIG = {
 //   autoResetMs: 2000,
 //   fetchTimeoutMs: 3000,
 //   plantCode: 'BNJRS10',
-//   weightTolerancePct: 0.20,   // ±20% weight deviation triggers confirmation
 // };

@@ -158,21 +158,6 @@ function weightApp() {
       var weightKg = this.stableWeight || this.weight;
       var weightGm = Math.round(weightKg * 1000);
 
-      // Weight validation against expected net_weight_gm
-      var self = this;
-      var product = this.products.find(function (p) {
-        return String(p.pack_id) === String(self.selectedPackId);
-      });
-      var expectedGm = product ? product.net_weight_gm : null;
-
-      if (expectedGm && Math.abs(weightGm - expectedGm) > expectedGm * (CONFIG.weightTolerancePct || 0.20)) {
-        var expectedKg = (expectedGm / 1000).toFixed(2);
-        if (!confirm('Weight ' + weightKg.toFixed(2) + 'kg differs from expected ' + expectedKg + 'kg. Print anyway?')) {
-          this.state = 'IDLE';
-          return;
-        }
-      }
-
       // Step 1: Add bag to sync-service (auto-creates session internally)
       try {
         var addRes = await this._fetchWithTimeout(
@@ -369,24 +354,6 @@ function weightApp() {
         ? (this.lastBag.weight_gm / 1000).toFixed(2) + ' kg'
         : '';
       return '#' + this.lastBag.bag_number + '  ' + this.lastBag.qr_code + '  ' + w;
-    },
-
-    get expectedWeightGm() {
-      if (!this.selectedPackId) return null;
-      var self = this;
-      var product = this.products.find(function (p) {
-        return String(p.pack_id) === String(self.selectedPackId);
-      });
-      return product ? product.net_weight_gm : null;
-    },
-
-    get expectedWeightRange() {
-      var gm = this.expectedWeightGm;
-      if (!gm) return '';
-      var tol = CONFIG.weightTolerancePct || 0.20;
-      var lo = ((gm * (1 - tol)) / 1000).toFixed(2);
-      var hi = ((gm * (1 + tol)) / 1000).toFixed(2);
-      return lo + ' - ' + hi + ' kg';
     },
 
     // ══════════════════════════════════════════════════════════════

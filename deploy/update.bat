@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 :: ============================================================
 :: Smart Weight System -- Pull Latest Code and Restart
 :: ============================================================
@@ -51,7 +52,7 @@ echo.
 echo  [3/4] Restarting services...
 if exist .launcher.pid (
     set /p LAUNCHER_PID=<.launcher.pid
-    taskkill /pid %LAUNCHER_PID% /t /f >nul 2>&1
+    taskkill /pid !LAUNCHER_PID! /t /f >nul 2>&1
     del .launcher.pid >nul 2>&1
     timeout /t 2 /nobreak >nul
 )
@@ -66,7 +67,7 @@ timeout /t 5 /nobreak >nul
 
 if exist .launcher.pid (
     set /p LAUNCHER_PID=<.launcher.pid
-    echo  [OK] Launcher running (PID %LAUNCHER_PID%)
+    echo  [OK] Launcher running ^(PID !LAUNCHER_PID!^)
 ) else (
     echo  [WARN] Launcher PID file not found. Check logs for errors.
 )

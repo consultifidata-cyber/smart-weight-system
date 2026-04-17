@@ -197,15 +197,6 @@ html, body {
   pointer-events: none;
 }
 
-/* ── Expected Weight Range ── */
-
-.weight-expected {
-  text-align: center;
-  font-size: 0.85rem;
-  color: var(--color-text-light);
-  margin-top: -4px;
-}
-
 /* ── Last Bag Info + Reprint ── */
 
 .last-bag-row {

@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 :: ============================================================
 :: Smart Weight System -- Start All Services
 :: ============================================================
@@ -30,8 +31,8 @@ if not exist "logs" mkdir logs
 :: Kill existing launcher if running
 if exist .launcher.pid (
     set /p LAUNCHER_PID=<.launcher.pid
-    echo  Stopping existing launcher (PID %LAUNCHER_PID%)...
-    taskkill /pid %LAUNCHER_PID% /t /f >nul 2>&1
+    echo  Stopping existing launcher ^(PID !LAUNCHER_PID!^)...
+    taskkill /pid !LAUNCHER_PID! /t /f >nul 2>&1
     del .launcher.pid >nul 2>&1
     timeout /t 2 /nobreak >nul
 )
@@ -48,7 +49,7 @@ timeout /t 5 /nobreak >nul
 :: Verify launcher is running
 if exist .launcher.pid (
     set /p LAUNCHER_PID=<.launcher.pid
-    echo  [OK] Launcher running (PID %LAUNCHER_PID%)
+    echo  [OK] Launcher running ^(PID !LAUNCHER_PID!^)
 ) else (
     echo  [WARN] Launcher PID file not found. Check logs for errors.
 )
