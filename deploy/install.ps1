@@ -255,29 +255,87 @@ pm2 status
 
 Write-Step "7/9" "Configuring auto-start on Windows boot"
 
-# Method: Create a startup shortcut that runs start-all.bat
-$startupFolder = [System.IO.Path]::Combine(
+# Remove old Startup shortcut (.lnk) from previous installs (if any).
+$oldShortcut = [System.IO.Path]::Combine(
     [Environment]::GetFolderPath("Startup"),
     "SmartWeightSystem.lnk"
 )
+if (Test-Path $oldShortcut) {
+    Remove-Item $oldShortcut -Force
+    Write-Host "  Removed old .lnk Startup shortcut." -ForegroundColor DarkGray
+}
 
-$startAllBat = Join-Path $repoRoot "deploy\start-all.bat"
+# -- 7a: Scheduled Task for PM2 (runs at system startup, Session 0) --
+# Uses absolute paths so pm2 is found even before the user's PATH is
+# fully loaded. Uses "pm2 start <ecosystem>" instead of "pm2 resurrect"
+# so it does not depend on dump.pm2.
+# LogonType S4U runs in Session 0 (non-interactive) so PM2's internal
+# wmic/tasklist monitoring calls never create visible CMD windows.
+$npmPrefix = (npm config get prefix 2>$null) | Out-String
+$npmPrefix = $npmPrefix.Trim()
+$pm2Full   = Join-Path $npmPrefix "pm2.cmd"
+
+if (-not (Test-Path $pm2Full)) {
+    Write-Warn "Could not resolve pm2.cmd at: $pm2Full"
+    Write-Host "  Falling back to PATH-based pm2 for Scheduled Task." -ForegroundColor Yellow
+    $pm2Full = "pm2"
+}
 
 try {
-    $WshShell = New-Object -ComObject WScript.Shell
-    $shortcut = $WshShell.CreateShortcut($startupFolder)
-    $shortcut.TargetPath = $startAllBat
-    $shortcut.WorkingDirectory = $repoRoot
-    $shortcut.Description = "Smart Weight System -- Auto Start"
-    $shortcut.WindowStyle = 7  # Minimized
-    $shortcut.Save()
-    Write-Ok "Startup shortcut created at: $startupFolder"
-    Write-Host "  Services will auto-start when Windows boots." -ForegroundColor DarkGray
+    Unregister-ScheduledTask -TaskName "SmartWeightPM2" -Confirm:$false -ErrorAction SilentlyContinue
+
+    $taskCmd  = "`"$pm2Full`" start `"$ecosystemFile`""
+    $action   = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c $taskCmd"
+    $trigger  = New-ScheduledTaskTrigger -AtStartup
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType S4U
+
+    Register-ScheduledTask -TaskName "SmartWeightPM2" `
+        -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
+        -Description "Smart Weight System -- PM2 auto-start" | Out-Null
+
+    Write-Ok "Scheduled Task 'SmartWeightPM2' registered (runs at startup, hidden)"
+    Write-Host "  pm2 path: $pm2Full" -ForegroundColor DarkGray
 } catch {
-    Write-Warn "Could not create startup shortcut: $_"
-    Write-Host "  Manual alternative: Place a shortcut to deploy\start-all.bat in:" -ForegroundColor Yellow
-    Write-Host "  shell:startup (Win+R -> shell:startup)" -ForegroundColor Yellow
+    Write-Warn "Could not create Scheduled Task: $_"
+    Write-Host "  Manual alternative: Open Task Scheduler and create a task that runs:" -ForegroundColor Yellow
+    Write-Host "    cmd /c `"$pm2Full`" start `"$ecosystemFile`"" -ForegroundColor Yellow
+    Write-Host "  Trigger: At startup | Run whether user is logged on or not" -ForegroundColor Yellow
 }
+
+# -- 7b: Browser auto-open at login (.url in Startup folder) --
+# The Scheduled Task runs in Session 0 (no desktop), so it cannot open
+# a browser. A .url shortcut in the Startup folder opens the web-ui
+# when the user logs in -- by then PM2 is already running.
+$startupUrl = [System.IO.Path]::Combine(
+    [Environment]::GetFolderPath("Startup"),
+    "SmartWeightSystem.url"
+)
+try {
+    $urlContent = @"
+[InternetShortcut]
+URL=http://localhost:3000
+"@
+    Set-Content -Path $startupUrl -Value $urlContent -Encoding ASCII
+    Write-Ok "Startup browser shortcut created (opens web-ui at login)"
+} catch {
+    Write-Warn "Could not create Startup .url shortcut: $_"
+}
+
+# -- 7c: Move PM2 daemon from interactive session to Session 0 --
+# Step 6 started PM2 in the current (interactive) session which causes
+# CMD window flashes from wmic monitoring. Kill it and restart via
+# the Scheduled Task so the daemon runs hidden in Session 0.
+Write-Host "  Moving PM2 daemon to background (Session 0)..."
+$savedEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+pm2 kill 2>&1 | Out-Null
+$ErrorActionPreference = $savedEAP
+Start-ScheduledTask -TaskName "SmartWeightPM2" -ErrorAction SilentlyContinue
+Write-Host "  Waiting 5 seconds for services to start in Session 0..."
+Start-Sleep -Seconds 5
+pm2 status
+Write-Ok "PM2 running in Session 0 (no CMD flash)"
 
 # -- Step 8: Create Desktop Shortcut --------------------------
 

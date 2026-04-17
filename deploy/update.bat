@@ -47,19 +47,23 @@ if %ERRORLEVEL% neq 0 (
     echo  [WARNING] npm install had issues. Services may still work.
 )
 
-:: Reload services from ecosystem config (picks up any config changes)
+:: Reload services -- kill daemon and restart via Scheduled Task so
+:: PM2 runs in Session 0 (no CMD window flashing from wmic monitoring).
 echo.
 echo  [3/4] Restarting services...
-for %%s in (weight-service print-service sync-service web-ui) do (
-    pm2 delete %%s >nul 2>&1
+pm2 kill >nul 2>&1
+schtasks /run /tn "SmartWeightPM2" >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo  [WARN] Scheduled Task not found. Starting directly...
+    echo         Run deploy\install.ps1 to set up the task.
+    pm2 start deploy\ecosystem.config.js
+    pm2 save
 )
-pm2 start deploy\ecosystem.config.js
-pm2 save
 
 :: Wait and show status
 echo.
 echo  [4/4] Verifying...
-timeout /t 3 /nobreak >nul
+timeout /t 5 /nobreak >nul
 pm2 status
 
 echo.

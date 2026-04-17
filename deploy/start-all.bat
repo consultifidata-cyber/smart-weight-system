@@ -27,27 +27,26 @@ if %ERRORLEVEL% neq 0 (
 :: Create logs directory if it doesn't exist
 if not exist "logs" mkdir logs
 
-:: Remove previous instances of our services (prevents duplicates on re-run)
-for %%s in (weight-service print-service sync-service web-ui) do (
-    pm2 delete %%s >nul 2>&1
-)
-
-:: Start all services
+:: Kill existing PM2 daemon (may be in interactive or Session 0)
 echo.
-echo  Starting services...
-pm2 start deploy\ecosystem.config.js
+echo  Stopping existing PM2 daemon...
+pm2 kill >nul 2>&1
+
+:: Restart PM2 via the Scheduled Task so the daemon runs in Session 0
+:: (non-interactive) -- this prevents CMD window flashing from PM2's
+:: internal wmic monitoring calls.
+echo  Starting services via Scheduled Task (Session 0)...
+schtasks /run /tn "SmartWeightPM2" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo  [ERROR] Failed to start services.
-    pause
-    exit /b 1
+    echo  [WARN] Scheduled Task not found. Starting directly...
+    echo         Run deploy\install.ps1 to set up the task.
+    pm2 start deploy\ecosystem.config.js
+    pm2 save
 )
 
-:: Save PM2 process list (for auto-restart on reboot)
-pm2 save
-
 echo.
-echo  All services started. Waiting 3 seconds for boot...
-timeout /t 3 /nobreak >nul
+echo  Waiting 5 seconds for services to boot...
+timeout /t 5 /nobreak >nul
 
 :: Show status
 pm2 status
