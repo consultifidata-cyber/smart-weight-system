@@ -146,6 +146,22 @@ if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
 
+// Idempotency: if another launcher is already running (e.g. Scheduled
+// Task started it at boot, now the Startup-folder .vbs fallback is
+// firing at login), exit quietly so we don't start a second instance.
+if (fs.existsSync(pidFile)) {
+  try {
+    const prevPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+    if (prevPid > 0) {
+      process.kill(prevPid, 0); // throws if process is gone
+      log(`Already running as PID ${prevPid}. Exiting this duplicate.`);
+      process.exit(0);
+    }
+  } catch (e) {
+    // ESRCH = stale PID file (process gone) or unreadable PID — overwrite it.
+  }
+}
+
 // Write PID file so stop/start scripts can find us
 fs.writeFileSync(pidFile, String(process.pid));
 

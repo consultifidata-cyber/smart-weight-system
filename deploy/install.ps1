@@ -145,6 +145,16 @@ if (Test-Path $oldLnk) {
     Write-Host "  Removed old .lnk Startup shortcut." -ForegroundColor DarkGray
 }
 
+# Remove any previous Startup-folder fallback .vbs (re-created in Step 7c)
+$oldVbs = [System.IO.Path]::Combine(
+    [Environment]::GetFolderPath("Startup"),
+    "SmartWeightLauncher.vbs"
+)
+if (Test-Path $oldVbs) {
+    Remove-Item $oldVbs -Force -ErrorAction SilentlyContinue
+    Write-Host "  Removed old .vbs Startup fallback." -ForegroundColor DarkGray
+}
+
 Write-Ok "Cleanup complete"
 
 # -- Step 3: Station Configuration ----------------------------
@@ -308,6 +318,33 @@ URL=http://localhost:3000
     Write-Ok "Startup browser shortcut created (opens web-ui at login)"
 } catch {
     Write-Warn "Could not create Startup .url shortcut: $_"
+}
+
+# -- 7c: Fallback launcher via Startup folder (belt-and-braces) --
+# The Scheduled Task above works on Windows Pro / domain accounts, but
+# Windows Home often denies S4U logon, silently preventing the task from
+# firing at boot. This .vbs runs at user login with no visible window
+# and starts the launcher. If the Scheduled Task already started it,
+# launcher.js detects the live PID and exits -- no double-start.
+$startupVbs = [System.IO.Path]::Combine(
+    [Environment]::GetFolderPath("Startup"),
+    "SmartWeightLauncher.vbs"
+)
+try {
+    $vbsContent = @"
+' Smart Weight System -- hidden launcher fallback
+' Fires at user login, starts node launcher with no CMD window.
+' launcher.js is idempotent: if already running (from Scheduled Task),
+' it exits without starting a duplicate.
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.CurrentDirectory = "$repoRoot"
+WshShell.Run """$nodePath"" ""$launcherFile""", 0, False
+"@
+    Set-Content -Path $startupVbs -Value $vbsContent -Encoding ASCII
+    Write-Ok "Startup launcher fallback created (runs at user login)"
+    Write-Host "  Safety net if Scheduled Task can't run on this Windows edition." -ForegroundColor DarkGray
+} catch {
+    Write-Warn "Could not create Startup launcher fallback: $_"
 }
 
 # -- Step 8: Create Desktop Shortcut --------------------------
