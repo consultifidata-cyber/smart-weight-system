@@ -5,9 +5,10 @@ import { parse } from './parser.js';
 import logger from '../utils/logger.js';
 import type { WeightReading } from '../types.js';
 
-const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_DELAY_MS = 3000;
 const MAX_DELAY_MS = 30000;
+const LOG_EVERY_ATTEMPT_THRESHOLD = 10;          // log first N attempts in detail
+const LOG_THROTTLE_INTERVAL_MS = 5 * 60 * 1000;  // then one line every 5 min
 
 export interface WeightReaderConfig {
   port: string;
@@ -27,6 +28,7 @@ export class WeightReader extends EventEmitter {
   public port: SerialPort | null = null;
   private lineParser: ReadlineParser | null = null;
   private reconnectAttempts = 0;
+  private lastLogAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closing = false;
 
@@ -76,22 +78,34 @@ export class WeightReader extends EventEmitter {
   }
 
   async openWithRetry(): Promise<void> {
-    while (this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS && !this.closing) {
+    // Infinite retry: loop until port opens successfully or service shuts down.
+    // Log first N attempts in detail, then throttle to one line every 5 min
+    // to keep logs bounded during long offline periods (e.g. overnight power cut).
+    while (!this.closing) {
       try {
         await this.open();
+        this.lastLogAt = 0;
         return;
       } catch {
         this.reconnectAttempts++;
         const delay = Math.min(BASE_DELAY_MS * Math.pow(2, this.reconnectAttempts - 1), MAX_DELAY_MS);
-        logger.warn({ attempt: this.reconnectAttempts, maxAttempts: MAX_RECONNECT_ATTEMPTS, retryInMs: delay }, 'Retrying serial port connection');
+
+        const now = Date.now();
+        const shouldLog =
+          this.reconnectAttempts <= LOG_EVERY_ATTEMPT_THRESHOLD ||
+          now - this.lastLogAt >= LOG_THROTTLE_INTERVAL_MS;
+
+        if (shouldLog) {
+          if (this.reconnectAttempts === LOG_EVERY_ATTEMPT_THRESHOLD + 1) {
+            logger.warn('Serial port still offline — throttling reconnect logs to once every 5 min');
+          } else {
+            logger.warn({ attempt: this.reconnectAttempts, retryInMs: delay }, 'Retrying serial port connection');
+          }
+          this.lastLogAt = now;
+        }
+
         await new Promise<void>(r => { this.reconnectTimer = setTimeout(r, delay); });
       }
-    }
-
-    if (!this.closing) {
-      const msg = `Failed to open serial port after ${MAX_RECONNECT_ATTEMPTS} attempts`;
-      logger.error(msg);
-      this.emit('error', new Error(msg));
     }
   }
 
@@ -115,6 +129,7 @@ export class WeightReader extends EventEmitter {
 
     if (!this.closing) {
       this.reconnectAttempts = 0;
+      this.lastLogAt = 0;
       logger.info('Attempting reconnection...');
       this.openWithRetry().catch(() => {});
     }
