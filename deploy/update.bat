@@ -21,10 +21,9 @@ if %ERRORLEVEL% neq 0 (
     pause
     exit /b 1
 )
-where pm2 >nul 2>&1
+where node >nul 2>&1
 if %ERRORLEVEL% neq 0 (
-    echo  [ERROR] PM2 is not installed or not in PATH.
-    echo  Run: npm install -g pm2
+    echo  [ERROR] Node.js is not installed or not in PATH.
     pause
     exit /b 1
 )
@@ -47,24 +46,30 @@ if %ERRORLEVEL% neq 0 (
     echo  [WARNING] npm install had issues. Services may still work.
 )
 
-:: Reload services -- kill daemon and restart via Scheduled Task so
-:: PM2 runs in Session 0 (no CMD window flashing from wmic monitoring).
+:: Stop existing services
 echo.
 echo  [3/4] Restarting services...
-pm2 kill >nul 2>&1
-schtasks /run /tn "SmartWeightPM2" >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo  [WARN] Scheduled Task not found. Starting directly...
-    echo         Run deploy\install.ps1 to set up the task.
-    pm2 start deploy\ecosystem.config.js
-    pm2 save
+if exist .launcher.pid (
+    set /p LAUNCHER_PID=<.launcher.pid
+    taskkill /pid %LAUNCHER_PID% /t /f >nul 2>&1
+    del .launcher.pid >nul 2>&1
+    timeout /t 2 /nobreak >nul
 )
 
-:: Wait and show status
+:: Start launcher hidden
+powershell -Command "Start-Process node -ArgumentList '\"deploy\launcher.js\"' -WorkingDirectory '%CD%' -WindowStyle Hidden"
+
+:: Wait and verify
 echo.
 echo  [4/4] Verifying...
 timeout /t 5 /nobreak >nul
-pm2 status
+
+if exist .launcher.pid (
+    set /p LAUNCHER_PID=<.launcher.pid
+    echo  [OK] Launcher running (PID %LAUNCHER_PID%)
+) else (
+    echo  [WARN] Launcher PID file not found. Check logs for errors.
+)
 
 echo.
 echo  Update complete.

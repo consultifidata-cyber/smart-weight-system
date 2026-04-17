@@ -11,19 +11,16 @@ echo.
 echo  Smart Weight System -- Stopping Services
 echo  ========================================
 
-where pm2 >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo  [ERROR] PM2 is not installed or not in PATH.
-    pause
-    exit /b 1
+if exist .launcher.pid (
+    set /p LAUNCHER_PID=<.launcher.pid
+    echo  Stopping launcher and all services (PID %LAUNCHER_PID%)...
+    taskkill /pid %LAUNCHER_PID% /t /f >nul 2>&1
+    del .launcher.pid >nul 2>&1
+    echo.
+    echo  [OK] All services stopped.
+) else (
+    echo  [WARN] No launcher PID file found. Services may not be running.
 )
-
-pm2 stop all
-pm2 save
-
-echo.
-echo  All services stopped.
-pm2 status
 
 echo.
 pause

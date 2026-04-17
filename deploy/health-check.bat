@@ -15,17 +15,21 @@ echo  Smart Weight System -- Health Check
 echo  ========================================
 echo.
 
-:: PM2 process status
-echo  [PM2 Process Status]
-echo  --------------------
-where pm2 >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo  PM2 not found. Services are not managed by PM2.
-    echo.
+:: Launcher status
+echo  [Launcher Status]
+echo  -----------------
+if exist .launcher.pid (
+    set /p LAUNCHER_PID=<.launcher.pid
+    tasklist /fi "PID eq %LAUNCHER_PID%" /nh 2>nul | findstr /i "node" >nul 2>&1
+    if %ERRORLEVEL% equ 0 (
+        echo  Launcher running (PID %LAUNCHER_PID%)
+    ) else (
+        echo  [WARN] Launcher PID %LAUNCHER_PID% is stale -- process not found.
+    )
 ) else (
-    pm2 status
-    echo.
+    echo  [WARN] Launcher not running (no PID file).
 )
+echo.
 
 :: Check each service HTTP endpoint
 echo  [Service Health Endpoints]
@@ -69,16 +73,17 @@ curl -s http://localhost:5002/sync/status 2>nul
 if %ERRORLEVEL% neq 0 (echo   Could not reach sync service.)
 echo.
 
-:: Recent PM2 logs (last 10 lines per service)
+:: Recent errors from log files
 echo.
 echo  [Recent Errors -- last 5 lines per service]
 echo  -------------------------------------------
-where pm2 >nul 2>&1
-if %ERRORLEVEL% equ 0 (
-    for %%s in (weight-service print-service sync-service web-ui) do (
-        echo.
-        echo  --- %%s ---
-        pm2 logs %%s --nostream --lines 5 --err 2>nul
+for %%s in (weight-service print-service sync-service web-ui) do (
+    echo.
+    echo  --- %%s ---
+    if exist "logs\%%s-error.log" (
+        powershell -Command "Get-Content 'logs\%%s-error.log' -Tail 5 2>$null"
+    ) else (
+        echo   (no error log)
     )
 )
 

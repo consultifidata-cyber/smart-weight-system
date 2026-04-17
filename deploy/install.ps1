@@ -9,14 +9,14 @@
 #
 # This script:
 #   1. Validates prerequisites (Node.js, Git, npm)
-#   2. Installs PM2 globally
+#   2. Cleans up any previous installation (PM2, old shortcuts)
 #   3. Prompts for station-specific configuration
 #   4. Creates .env from template
 #   5. Runs npm install
-#   6. Starts services via PM2
-#   7. Configures auto-start on Windows boot
-#   8. Creates a desktop shortcut
-#   9. Opens the web-ui in the browser
+#   6. Creates logs directory
+#   7. Starts services via launcher
+#   8. Configures auto-start on Windows boot
+#   9. Creates a desktop shortcut and opens the browser
 # ============================================================
 
 param(
@@ -107,22 +107,45 @@ if (-not $SkipPrereqs) {
     Write-Host "  Skipping prerequisite check (--SkipPrereqs)" -ForegroundColor DarkGray
 }
 
-# -- Step 2: Install PM2 Globally -----------------------------
+# -- Step 2: Clean Up Previous Installation --------------------
 
-Write-Step "2/9" "Installing PM2 globally"
+Write-Step "2/9" "Cleaning up previous installation"
 
-if (Test-Command "pm2") {
-    $pm2Version = (pm2 --version 2>$null)
-    Write-Ok "PM2 $pm2Version already installed"
-} else {
-    Write-Host "  Installing pm2..."
-    npm install -g pm2
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "Failed to install PM2. Try: npm install -g pm2"
-        exit 1
-    }
-    Write-Ok "PM2 installed"
+# Kill old launcher if running
+$pidFile = Join-Path $repoRoot ".launcher.pid"
+if (Test-Path $pidFile) {
+    $oldPid = (Get-Content $pidFile -Raw).Trim()
+    Write-Host "  Stopping old launcher (PID $oldPid)..." -ForegroundColor DarkGray
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    taskkill /pid $oldPid /t /f 2>&1 | Out-Null
+    $ErrorActionPreference = $savedEAP
+    Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
+
+# Kill PM2 daemon if running (upgrade from PM2-based install)
+if (Test-Command "pm2") {
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    pm2 kill 2>&1 | Out-Null
+    $ErrorActionPreference = $savedEAP
+    Write-Host "  Stopped PM2 daemon (if any)." -ForegroundColor DarkGray
+}
+
+# Remove old PM2 Scheduled Task
+Unregister-ScheduledTask -TaskName "SmartWeightPM2" -Confirm:$false -ErrorAction SilentlyContinue
+
+# Remove old Startup shortcut (.lnk from PM2-based install)
+$oldLnk = [System.IO.Path]::Combine(
+    [Environment]::GetFolderPath("Startup"),
+    "SmartWeightSystem.lnk"
+)
+if (Test-Path $oldLnk) {
+    Remove-Item $oldLnk -Force
+    Write-Host "  Removed old .lnk Startup shortcut." -ForegroundColor DarkGray
+}
+
+Write-Ok "Cleanup complete"
 
 # -- Step 3: Station Configuration ----------------------------
 
@@ -216,97 +239,62 @@ if (-not (Test-Path $logsDir)) {
     Write-Ok "Logs directory already exists"
 }
 
-# -- Step 6: Start Services via PM2 ---------------------------
+# -- Step 6: Start Services ------------------------------------
 
-Write-Step "6/9" "Starting services via PM2"
+Write-Step "6/9" "Starting services"
 
-$ecosystemFile = Join-Path $repoRoot "deploy\ecosystem.config.js"
+$launcherFile = Join-Path $repoRoot "deploy\launcher.js"
+$nodePath = (Get-Command node).Source
 
-# If any of our services are already registered in PM2, remove them first
-# so the ecosystem config is loaded fresh. Skip on first-time install.
-$pm2List = (pm2 jlist 2>&1) | Out-String
-$ourServices = @('weight-service','print-service','sync-service','web-ui')
-foreach ($svc in $ourServices) {
-    if ($pm2List -match "`"name`":\s*`"$svc`"") {
-        Write-Host "  Removing existing PM2 process: $svc" -ForegroundColor DarkGray
-        $savedEAP = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        pm2 delete $svc 2>&1 | Out-Null
-        $ErrorActionPreference = $savedEAP
-    }
-}
+# Start the launcher hidden (no visible window)
+Start-Process -FilePath $nodePath -ArgumentList "`"$launcherFile`"" `
+    -WorkingDirectory $repoRoot -WindowStyle Hidden
 
-pm2 start $ecosystemFile
-if ($LASTEXITCODE -ne 0) {
-    Write-Err "PM2 failed to start services."
-    exit 1
-}
-
-pm2 save
-Write-Ok "All 4 services started"
-
-# Wait for services to boot
 Write-Host "  Waiting 5 seconds for services to initialize..."
 Start-Sleep -Seconds 5
 
-pm2 status
+# Verify services started by checking the PID file
+$pidFile = Join-Path $repoRoot ".launcher.pid"
+if (Test-Path $pidFile) {
+    $launcherPid = (Get-Content $pidFile -Raw).Trim()
+    Write-Ok "Launcher running (PID $launcherPid)"
+} else {
+    Write-Warn "Launcher PID file not found. Check logs for errors."
+}
 
 # -- Step 7: Configure Auto-Start on Boot ---------------------
 
 Write-Step "7/9" "Configuring auto-start on Windows boot"
 
-# Remove old Startup shortcut (.lnk) from previous installs (if any).
-$oldShortcut = [System.IO.Path]::Combine(
-    [Environment]::GetFolderPath("Startup"),
-    "SmartWeightSystem.lnk"
-)
-if (Test-Path $oldShortcut) {
-    Remove-Item $oldShortcut -Force
-    Write-Host "  Removed old .lnk Startup shortcut." -ForegroundColor DarkGray
-}
-
-# -- 7a: Scheduled Task for PM2 (runs at system startup, Session 0) --
-# Uses absolute paths so pm2 is found even before the user's PATH is
-# fully loaded. Uses "pm2 start <ecosystem>" instead of "pm2 resurrect"
-# so it does not depend on dump.pm2.
-# LogonType S4U runs in Session 0 (non-interactive) so PM2's internal
-# wmic/tasklist monitoring calls never create visible CMD windows.
-$npmPrefix = (npm config get prefix 2>$null) | Out-String
-$npmPrefix = $npmPrefix.Trim()
-$pm2Full   = Join-Path $npmPrefix "pm2.cmd"
-
-if (-not (Test-Path $pm2Full)) {
-    Write-Warn "Could not resolve pm2.cmd at: $pm2Full"
-    Write-Host "  Falling back to PATH-based pm2 for Scheduled Task." -ForegroundColor Yellow
-    $pm2Full = "pm2"
-}
-
+# -- 7a: Scheduled Task to start launcher at system startup --
+# Uses node.exe directly (not cmd.exe) so no CMD window appears.
 try {
-    Unregister-ScheduledTask -TaskName "SmartWeightPM2" -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName "SmartWeightLauncher" -Confirm:$false -ErrorAction SilentlyContinue
 
-    $taskCmd  = "`"$pm2Full`" start `"$ecosystemFile`""
-    $action   = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c $taskCmd"
+    $action   = New-ScheduledTaskAction -Execute $nodePath -Argument "`"$launcherFile`"" -WorkingDirectory $repoRoot
     $trigger  = New-ScheduledTaskTrigger -AtStartup
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 0)
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest -LogonType S4U
 
-    Register-ScheduledTask -TaskName "SmartWeightPM2" `
+    Register-ScheduledTask -TaskName "SmartWeightLauncher" `
         -Action $action -Trigger $trigger -Settings $settings -Principal $principal `
-        -Description "Smart Weight System -- PM2 auto-start" | Out-Null
+        -Description "Smart Weight System -- auto-start services at boot" | Out-Null
 
-    Write-Ok "Scheduled Task 'SmartWeightPM2' registered (runs at startup, hidden)"
-    Write-Host "  pm2 path: $pm2Full" -ForegroundColor DarkGray
+    Write-Ok "Scheduled Task 'SmartWeightLauncher' registered"
+    Write-Host "  Services will auto-start when Windows boots." -ForegroundColor DarkGray
 } catch {
     Write-Warn "Could not create Scheduled Task: $_"
     Write-Host "  Manual alternative: Open Task Scheduler and create a task that runs:" -ForegroundColor Yellow
-    Write-Host "    cmd /c `"$pm2Full`" start `"$ecosystemFile`"" -ForegroundColor Yellow
+    Write-Host "    node `"$launcherFile`"" -ForegroundColor Yellow
     Write-Host "  Trigger: At startup | Run whether user is logged on or not" -ForegroundColor Yellow
 }
 
-# -- 7b: Browser auto-open at login (.url in Startup folder) --
-# The Scheduled Task runs in Session 0 (no desktop), so it cannot open
-# a browser. A .url shortcut in the Startup folder opens the web-ui
-# when the user logs in -- by then PM2 is already running.
+# -- 7b: Browser auto-open at user login --
+# The Scheduled Task runs at system startup (before login), so it
+# cannot open a browser. A .url shortcut in the Startup folder opens
+# the web-ui when the user logs in -- by then services are running.
 $startupUrl = [System.IO.Path]::Combine(
     [Environment]::GetFolderPath("Startup"),
     "SmartWeightSystem.url"
@@ -322,21 +310,6 @@ URL=http://localhost:3000
     Write-Warn "Could not create Startup .url shortcut: $_"
 }
 
-# -- 7c: Move PM2 daemon from interactive session to Session 0 --
-# Step 6 started PM2 in the current (interactive) session which causes
-# CMD window flashes from wmic monitoring. Kill it and restart via
-# the Scheduled Task so the daemon runs hidden in Session 0.
-Write-Host "  Moving PM2 daemon to background (Session 0)..."
-$savedEAP = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-pm2 kill 2>&1 | Out-Null
-$ErrorActionPreference = $savedEAP
-Start-ScheduledTask -TaskName "SmartWeightPM2" -ErrorAction SilentlyContinue
-Write-Host "  Waiting 5 seconds for services to start in Session 0..."
-Start-Sleep -Seconds 5
-pm2 status
-Write-Ok "PM2 running in Session 0 (no CMD flash)"
-
 # -- Step 8: Create Desktop Shortcut --------------------------
 
 Write-Step "8/9" "Creating desktop shortcut"
@@ -345,8 +318,6 @@ $desktopPath = [Environment]::GetFolderPath("Desktop")
 $desktopShortcut = Join-Path $desktopPath "Smart Weight System.url"
 
 try {
-    # .url (Internet Shortcut) opens correctly in the default browser.
-    # .lnk shortcuts cannot have a URL as TargetPath.
     $urlContent = @"
 [InternetShortcut]
 URL=http://localhost:3000
@@ -378,9 +349,9 @@ Write-Host "  Print API:    http://localhost:5001/health" -ForegroundColor White
 Write-Host "  Sync API:     http://localhost:5002/health" -ForegroundColor White
 Write-Host ""
 Write-Host "  Useful commands:" -ForegroundColor DarkGray
-Write-Host "    pm2 status           -- Check service status" -ForegroundColor DarkGray
-Write-Host "    pm2 logs             -- View live logs" -ForegroundColor DarkGray
-Write-Host "    pm2 restart all      -- Restart all services" -ForegroundColor DarkGray
 Write-Host "    deploy\health-check.bat -- Full health check" -ForegroundColor DarkGray
-Write-Host "    deploy\update.bat    -- Pull latest + restart" -ForegroundColor DarkGray
+Write-Host "    deploy\start-all.bat    -- Start all services" -ForegroundColor DarkGray
+Write-Host "    deploy\stop-all.bat     -- Stop all services" -ForegroundColor DarkGray
+Write-Host "    deploy\update.bat       -- Pull latest + restart" -ForegroundColor DarkGray
+Write-Host "    type logs\*.log         -- View service logs" -ForegroundColor DarkGray
 Write-Host ""
