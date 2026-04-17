@@ -24,20 +24,26 @@ async function main(): Promise<void> {
     // Create and start Express server
     const app = createServer(driver, config);
 
-    app.listen(config.apiPort, () => {
+    const server = app.listen(config.apiPort, () => {
       logger.info({ port: config.apiPort }, 'Print service listening');
     });
 
-    // Graceful shutdown
-    process.on('SIGINT', () => {
-      logger.info('SIGINT received, shutting down');
-      process.exit(0);
-    });
+    // Graceful shutdown: drain in-flight print requests before exit.
+    // Critical: aborting a TSPL buffer mid-stream can jam the printer.
+    const shutdown = (signal: string): void => {
+      logger.info({ signal }, 'Shutting down print service');
+      server.close(() => {
+        logger.info('Print service stopped');
+        process.exit(0);
+      });
+      setTimeout(() => {
+        logger.warn('Graceful shutdown timed out, forcing exit');
+        process.exit(1);
+      }, 4000);
+    };
 
-    process.on('SIGTERM', () => {
-      logger.info('SIGTERM received, shutting down');
-      process.exit(0);
-    });
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.error({ error }, 'Fatal error');

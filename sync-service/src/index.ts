@@ -30,23 +30,32 @@ async function main(): Promise<void> {
     // Pass client so session routes can proxy to Django
     const app = createServer(queries, config, undefined, pullMasterData, client, syncEngine);
 
-    app.listen(config.apiPort, () => {
+    const server = app.listen(config.apiPort, () => {
       logger.info({ port: config.apiPort }, 'Sync service listening');
     });
 
     // Start sync engine (offline session retry loop + master data timer)
     syncEngine.start();
 
-    // Graceful shutdown
-    const shutdown = () => {
-      logger.info('Shutting down sync service');
+    // Graceful shutdown: drain in-flight HTTP requests before closing DB
+    const shutdown = (signal: string): void => {
+      logger.info({ signal }, 'Shutting down sync service');
       syncEngine.stop();
-      closeDb();
-      process.exit(0);
+      server.close(() => {
+        closeDb();
+        logger.info('Sync service stopped');
+        process.exit(0);
+      });
+      // Force exit after 4s if drain stalls (launcher waits 5s total)
+      setTimeout(() => {
+        logger.warn('Graceful shutdown timed out, forcing exit');
+        closeDb();
+        process.exit(1);
+      }, 4000);
     };
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     logger.error({ error }, 'Fatal error');

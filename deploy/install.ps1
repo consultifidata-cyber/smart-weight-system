@@ -347,9 +347,9 @@ WshShell.Run """$nodePath"" ""$launcherFile""", 0, False
     Write-Warn "Could not create Startup launcher fallback: $_"
 }
 
-# -- Step 8: Create Desktop Shortcut --------------------------
+# -- Step 8: Create Desktop Shortcuts -------------------------
 
-Write-Step "8/9" "Creating desktop shortcut"
+Write-Step "8/9" "Creating desktop shortcuts"
 
 $desktopPath = [Environment]::GetFolderPath("Desktop")
 $desktopShortcut = Join-Path $desktopPath "Smart Weight System.url"
@@ -364,6 +364,28 @@ IconIndex=0
     Write-Ok "Desktop shortcut created: Smart Weight System.url"
 } catch {
     Write-Warn "Could not create desktop shortcut: $_"
+}
+
+# -- 8b: "Restart Services" .lnk shortcut --------------------
+# One-click restart for workers. Points to start-all.bat which
+# stops the current launcher (graceful drain) and starts it again.
+# No confirm prompt by design -- workers click to self-service.
+$startAllBat = Join-Path $repoRoot "deploy\start-all.bat"
+$restartLnk = Join-Path $desktopPath "Smart Weight - Restart Services.lnk"
+
+try {
+    $wshShell = New-Object -ComObject WScript.Shell
+    $lnk = $wshShell.CreateShortcut($restartLnk)
+    $lnk.TargetPath       = "$env:ComSpec"                    # cmd.exe
+    $lnk.Arguments        = "/c `"`"$startAllBat`"`""          # /c "start-all.bat"
+    $lnk.WorkingDirectory = Join-Path $repoRoot "deploy"
+    $lnk.IconLocation     = "shell32.dll,238"                  # circular-arrow refresh icon
+    $lnk.WindowStyle      = 7                                  # minimised
+    $lnk.Description      = "Restart all Smart Weight System services"
+    $lnk.Save()
+    Write-Ok "Desktop shortcut created: Smart Weight - Restart Services.lnk"
+} catch {
+    Write-Warn "Could not create restart shortcut: $_"
 }
 
 # -- Step 9: Open Browser -------------------------------------
