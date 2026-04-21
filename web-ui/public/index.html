@@ -40,56 +40,80 @@
       </div>
     </div>
 
-    <!-- Weight Display -->
-    <div class="weight-card" :class="weightColorClass">
-      <div>
-        <span class="weight-value" x-text="weightDisplay"></span>
-        <span class="weight-unit" x-text="unit"></span>
-      </div>
-      <div class="weight-status" x-text="weightLabel"></div>
-    </div>
+    <!-- Main area: recent panel (left) + main column (right) -->
+    <div class="main-area">
 
-    <!-- Product Selector (always visible) -->
-    <div class="select-wrapper">
-      <select class="product-select" x-model="selectedPackId"
-        :disabled="state === 'PRINTING' || state === 'PRINTED'">
-        <option value="">-- Select Product --</option>
-        <template x-for="p in products" :key="p.pack_id">
-          <option
-            :value="p.pack_id"
-            x-text="p.name + (p.net_weight_gm ? ' (' + p.net_weight_gm + 'g)' : '')"
-          ></option>
+      <!-- Recent Products Panel -->
+      <div class="recent-panel">
+        <div class="recent-panel-title">Recent</div>
+        <template x-for="p in recentProducts" :key="p.pack_id">
+          <button
+            class="recent-btn"
+            :class="{ active: String(selectedPackId) === String(p.pack_id) }"
+            :disabled="state === 'PRINTING' || state === 'PRINTED'"
+            @click="selectRecentProduct(p.pack_id)"
+            x-text="p.name"
+          ></button>
         </template>
-      </select>
-      <span class="select-arrow">&#9662;</span>
-    </div>
-
-    <!-- Last Bag Info + Reprint -->
-    <div class="last-bag-row" x-show="lastBag" x-transition>
-      <div class="last-bag-card">
-        <span class="last-bag-label">Last:</span>
-        <span class="last-bag-text" x-text="lastBagDisplay"></span>
+        <div class="recent-empty" x-show="recentProducts.length === 0">No recent</div>
       </div>
-      <button class="reprint-btn"
-        :disabled="state === 'PRINTING' || state === 'PRINTED'"
-        @click="reprintLast()">Reprint</button>
-    </div>
 
-    <!-- Spacer pushes button to bottom -->
-    <div class="spacer"></div>
+      <!-- Main Column -->
+      <div class="main-col">
 
-    <!-- PRINT button (always visible) -->
-    <button
-      class="print-btn"
-      :class="{
-        printing: state === 'PRINTING',
-        success: state === 'PRINTED',
-        error: state === 'PRINT_FAILED'
-      }"
-      :disabled="printButtonDisabled"
-      @click="state === 'PRINT_FAILED' ? retryPrint() : doPrint()"
-      x-text="printButtonText"
-    ></button>
+        <!-- Weight Display -->
+        <div class="weight-card" :class="weightColorClass">
+          <div>
+            <span class="weight-value" x-text="weightDisplay"></span>
+            <span class="weight-unit" x-text="unit"></span>
+          </div>
+          <div class="weight-status" x-text="weightLabel"></div>
+        </div>
+
+        <!-- Product Selector (always visible) -->
+        <div class="select-wrapper">
+          <select class="product-select" x-model="selectedPackId"
+            :disabled="state === 'PRINTING' || state === 'PRINTED'">
+            <option value="">-- Select Product --</option>
+            <template x-for="p in products" :key="p.pack_id">
+              <option
+                :value="p.pack_id"
+                x-text="p.name + (p.net_weight_gm ? ' (' + p.net_weight_gm + 'g)' : '')"
+              ></option>
+            </template>
+          </select>
+          <span class="select-arrow">&#9662;</span>
+        </div>
+
+        <!-- Last Bag Info + Reprint -->
+        <div class="last-bag-row" x-show="lastBag" x-transition>
+          <div class="last-bag-card">
+            <span class="last-bag-label">Last:</span>
+            <span class="last-bag-text" x-text="lastBagDisplay"></span>
+          </div>
+          <button class="reprint-btn"
+            :disabled="state === 'PRINTING' || state === 'PRINTED'"
+            @click="reprintLast()">Reprint</button>
+        </div>
+
+        <!-- Spacer pushes button to bottom -->
+        <div class="spacer"></div>
+
+        <!-- PRINT button (always visible) -->
+        <button
+          class="print-btn"
+          :class="{
+            printing: state === 'PRINTING',
+            success: state === 'PRINTED',
+            error: state === 'PRINT_FAILED'
+          }"
+          :disabled="printButtonDisabled"
+          @click="state === 'PRINT_FAILED' ? retryPrint() : doPrint()"
+          x-text="printButtonText"
+        ></button>
+
+      </div><!-- /.main-col -->
+    </div><!-- /.main-area -->
 
   </div>
 

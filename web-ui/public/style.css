@@ -35,7 +35,7 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  max-width: 600px;
+  max-width: 800px;
   margin: 0 auto;
   padding: 16px;
   gap: 12px;
@@ -362,4 +362,87 @@ html, body {
 
 .spacer {
   flex: 1;
+}
+
+/* ── Main area (two-column layout) ── */
+
+.main-area {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Recent Products Panel (left column) ── */
+
+.recent-panel {
+  width: 250px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--color-card);
+  border-radius: 14px;
+  padding: 12px 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  overflow: hidden;
+}
+
+.recent-panel-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-light);
+  margin-bottom: 2px;
+}
+
+.recent-btn {
+  width: 100%;
+  padding: 10px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.recent-btn.active {
+  border-color: var(--color-primary);
+  background: #eff6ff;
+  color: var(--color-primary);
+}
+
+.recent-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.recent-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.recent-empty {
+  font-size: 0.72rem;
+  color: var(--color-text-light);
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* ── Main column (right column) ── */
+
+.main-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }

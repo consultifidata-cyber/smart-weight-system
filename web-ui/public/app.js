@@ -27,6 +27,9 @@ function weightApp() {
     // ── Last bag (for label display + reprint) ──
     lastBag: null, // { qr_code, bag_number, pack_name, weight_gm, weight_kg, line1 }
 
+    // ── Recent products (last 5 unique, most-recent first) ──
+    recentProducts: [], // [{ pack_id, name }, ...]
+
     // ── UI ──
     errorMessage: null,
 
@@ -47,6 +50,13 @@ function weightApp() {
       this.loadProducts();
       this.refreshTodaySummary();
       this.startPolling();
+      try {
+        var cached = localStorage.getItem('recent_products');
+        if (cached) {
+          var parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) this.recentProducts = parsed;
+        }
+      } catch (e) { /* ignore */ }
     },
 
     destroy() {
@@ -190,6 +200,9 @@ function weightApp() {
           line1: line1,
         };
         this.totalBagsToday = bagData.total_bags_today;
+
+        // Update recent products panel
+        this._updateRecentProducts(Number(this.selectedPackId), bagData.pack_name);
 
         // Update per-product count in local summary
         this._updateLocalProductCount(bagData.pack_name);
@@ -359,6 +372,19 @@ function weightApp() {
     // ══════════════════════════════════════════════════════════════
     // Internal helpers
     // ══════════════════════════════════════════════════════════════
+
+    selectRecentProduct(packId) {
+      this.selectedPackId = String(packId);
+    },
+
+    _updateRecentProducts(packId, packName) {
+      var filtered = this.recentProducts.filter(function(p) {
+        return String(p.pack_id) !== String(packId);
+      });
+      filtered.unshift({ pack_id: packId, name: packName });
+      this.recentProducts = filtered.slice(0, 5);
+      try { localStorage.setItem('recent_products', JSON.stringify(this.recentProducts)); } catch (e) { /* ignore */ }
+    },
 
     _updateLocalProductCount(packName) {
       var found = false;
