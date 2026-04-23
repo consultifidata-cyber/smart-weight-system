@@ -47,6 +47,8 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
   padding: 8px 16px;
   background: var(--color-card);
   border-radius: 12px;
@@ -55,17 +57,19 @@ html, body {
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
-.status-dot {
+.status-badge {
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-right: 6px;
-  vertical-align: middle;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: white;
+  white-space: nowrap;
 }
 
-.status-dot.connected { background: var(--color-stable); }
-.status-dot.disconnected { background: var(--color-error); }
+.status-badge.status-connected { background: var(--color-stable); }
+.status-badge.status-connecting { background: var(--color-settling); }
+.status-badge.status-disconnected { background: var(--color-error); }
 
 .status-item {
   display: flex;

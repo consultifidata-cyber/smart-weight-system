@@ -26,7 +26,8 @@ router.post('/print', async (req: Request, res: Response) => {
     const body = req.body as PrintRequest;
 
     // Validate required fields
-    if (!body.product || body.weight === undefined || !body.stationId || !body.line1 || !body.line2) {
+    if (!body.product || !body.stationId || !body.line1 || !body.line2 ||
+        body.weight === undefined || body.weight === null || typeof body.weight !== 'number' || body.weight <= 0 || !isFinite(body.weight)) {
       res.status(400).json({
         status: 'error',
         error: 'Missing required fields: product, weight, stationId, line1, line2',

@@ -15,6 +15,7 @@ function weightApp() {
     // ── Connectivity ──
     printerConnected: false,
     syncConnected: false,
+    weightServiceReachable: false,
 
     // ── Products (FGPackConfig list from sync-service) ──
     products: [],
@@ -131,12 +132,14 @@ function weightApp() {
           self.stable = data.stable || false;
           self.stableWeight = data.stableWeight;
           self.weightStatus = data.status || 'ok';
+          self.weightServiceReachable = true;
         })
         .catch(function () {
           self.weight = null;
           self.stable = false;
           self.stableWeight = null;
           self.weightStatus = 'disconnected';
+          self.weightServiceReachable = false;
         });
     },
 
@@ -325,7 +328,7 @@ function weightApp() {
     // ══════════════════════════════════════════════════════════════
 
     get canPrint() {
-      return this.state === 'IDLE' && this.stable && this.selectedPackId;
+      return this.state === 'IDLE' && this.weightStatus === 'ok' && this.stable && this.selectedPackId;
     },
 
     get weightDisplay() {
@@ -347,10 +350,31 @@ function weightApp() {
       return 'Settling...';
     },
 
+    get weightStatusText() {
+      if (this.weightStatus === 'ok') return 'Weight Machine Connected';
+      if (this.weightServiceReachable && this.weightStatus === 'disconnected') return 'Connecting to Weight Machine';
+      return 'Weight Machine Disconnected';
+    },
+
+    get weightStatusClass() {
+      if (this.weightStatus === 'ok') return 'status-connected';
+      if (this.weightServiceReachable && this.weightStatus === 'disconnected') return 'status-connecting';
+      return 'status-disconnected';
+    },
+
+    get printerStatusText() {
+      return this.printerConnected ? 'Printer Connected' : 'Printer Disconnected';
+    },
+
+    get syncStatusText() {
+      return this.syncConnected ? 'Sync Connected' : 'Sync Disconnected';
+    },
+
     get printButtonText() {
       if (this.state === 'PRINTING') return 'Printing...';
       if (this.state === 'PRINTED') return 'Printed!';
       if (this.state === 'PRINT_FAILED') return 'Retry Print';
+      if (this.weightStatus !== 'ok') return 'Scale Disconnected';
       if (!this.selectedPackId) return 'Select Product';
       if (!this.stable) return 'Waiting for Stable Weight...';
       return 'PRINT';

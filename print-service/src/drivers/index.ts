@@ -14,9 +14,9 @@ export function createDriver(config: PrinterConfig): PrinterDriver {
     case 'tspl':
       return new TSPLDriver(device, labelWidth, labelHeight, dpi, config.printerName);
 
-    // Future: ZPL driver, ESCPOS driver, CUPS driver, etc.
-    case 'zpl':
-      throw new Error('ZPL driver not yet implemented');
+    // Future: TSC driver, ESCPOS driver, CUPS driver, etc.
+    case 'TSC':
+      throw new Error('TSC driver not yet implemented');
 
     default:
       throw new Error(`Unknown printer driver: ${driver}`);

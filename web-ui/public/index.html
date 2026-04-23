@@ -19,16 +19,15 @@
         <strong x-text="'Station: ' + CONFIG.stationId"></strong>
       </div>
       <div class="status-item">
-        <span class="status-dot" :class="weightStatus === 'ok' ? 'connected' : 'disconnected'"></span>
-        Scale
+        <span class="status-badge" :class="weightStatusClass" x-text="weightStatusText"></span>
       </div>
       <div class="status-item">
-        <span class="status-dot" :class="printerConnected ? 'connected' : 'disconnected'"></span>
-        Printer
+        <span class="status-badge" :class="printerConnected ? 'status-connected' : 'status-disconnected'"
+          x-text="printerStatusText"></span>
       </div>
       <div class="status-item">
-        <span class="status-dot" :class="syncConnected ? 'connected' : 'disconnected'"></span>
-        Sync
+        <span class="status-badge" :class="syncConnected ? 'status-connected' : 'status-disconnected'"
+          x-text="syncStatusText"></span>
       </div>
     </div>
 

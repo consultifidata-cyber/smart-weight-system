@@ -27,6 +27,11 @@ router.post('/add', (req: Request, res: Response) => {
     return;
   }
 
+  if (weight_gm === undefined || weight_gm === null || typeof weight_gm !== 'number' || weight_gm <= 0 || !isFinite(weight_gm)) {
+    res.status(400).json({ status: 'error', error: 'Valid weight_gm (positive number) is required' });
+    return;
+  }
+
   const today = new Date().toISOString().substring(0, 10);
   const now = new Date().toISOString();
 
