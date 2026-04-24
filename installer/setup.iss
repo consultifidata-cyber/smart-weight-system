@@ -76,8 +76,13 @@ Source: "assets\node-runtime\*"; \
 ; ── Tools: NSSM + PowerShell scripts ────────────────────────────────────────
 Source: "assets\tools\nssm.exe"; \
   DestDir: "{app}\tools"
-Source: "tools\*.ps1"; \
-  DestDir: "{app}\tools"
+Source: "tools\install-service.ps1";   DestDir: "{app}\tools"
+Source: "tools\remove-service.ps1";    DestDir: "{app}\tools"
+Source: "tools\service-status.ps1";    DestDir: "{app}\tools"
+Source: "tools\detect-hardware.ps1";   DestDir: "{app}\tools"
+Source: "tools\generate-env.ps1";      DestDir: "{app}\tools"
+Source: "tools\add-firewall-rules.ps1"; DestDir: "{app}\tools"
+Source: "tools\health-report.ps1";     DestDir: "{app}\tools"
 
 ; ── Application: deploy scripts ─────────────────────────────────────────────
 Source: "..\deploy\launcher.js";       DestDir: "{app}\deploy"
@@ -607,4 +612,31 @@ begin
     Space + '2. Windows Service registered' + NewLine +
     Space + '3. System starts automatically' + NewLine +
     Space + '4. Browser opens to http://localhost:3000';
+end;
+
+// ── Custom Finish page — show URLs, log path, support command ─────────────────
+procedure CurPageChanged(CurPageID: Integer);
+var
+  FinishText: String;
+begin
+  if CurPageID = wpFinished then begin
+    FinishText :=
+      'Smart Weight System has been installed.' + #13#10 +
+      #13#10 +
+      'Open the web dashboard:' + #13#10 +
+      '  http://localhost:3000' + #13#10 +
+      #13#10 +
+      'Check that all services are running:' + #13#10 +
+      '  http://localhost:5099/health' + #13#10 +
+      #13#10 +
+      'If something is not working:' + #13#10 +
+      '  1. Check logs:  C:\SmartWeightSystem\logs\launcher.log' + #13#10 +
+      '  2. Run health report (creates zip on Desktop for support):' + #13#10 +
+      '     powershell -File "C:\SmartWeightSystem\tools\health-report.ps1"' + #13#10 +
+      #13#10 +
+      'To restart the system:' + #13#10 +
+      '  net stop SmartWeightSystem  &&  net start SmartWeightSystem';
+
+    WizardForm.FinishedLabel.Caption := FinishText;
+  end;
 end;

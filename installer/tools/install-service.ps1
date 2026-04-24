@@ -261,9 +261,15 @@ if ($healthy) {
     Write-Host "  Health  → http://localhost:$HealthPort/health"
 } else {
     Write-Host "  [INSTALLED]  Service '$ServiceName' registered." -ForegroundColor Yellow
-    Write-Host '  [WARN]  Health endpoint did not respond within 30s.'
-    Write-Host '  This is normal if services take longer to start.'
-    Write-Host "  Check: Get-Content '$logsDir\launcher.log' -Tail 30"
+    Write-Host '  [WARN]  Health endpoint did not respond within 30s.' -ForegroundColor Yellow
+    Write-Host '  This is normal if services take longer to start on first boot.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  To diagnose:' -ForegroundColor Cyan
+    Write-Host "    1. Check logs:  $logsDir\launcher.log"
+    Write-Host "    2. Run support report:"
+    Write-Host "       powershell -File `"$InstallDir\tools\health-report.ps1`""
+    Write-Host "    3. Check service: sc query $ServiceName"
+    Write-Host "    4. Health API:    curl http://localhost:$HealthPort/health"
 }
 
 Write-Host '=================================================' -ForegroundColor Cyan
