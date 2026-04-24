@@ -122,16 +122,28 @@ jobs:
           echo "appver=$appVer"  >> $env:GITHUB_OUTPUT
         shell: pwsh
 
-      # ── 8. Install Inno Setup 6 ───────────────────────────────────────────────
-      - name: Install Inno Setup 6
-        run: choco install innosetup --version=6.3.3 --yes --no-progress
-        shell: cmd
+      # ── 8. Locate / install Inno Setup 6 ─────────────────────────────────────
+      # windows-latest already ships with Inno Setup 6.x — no pinned version.
+      # choco exits 0 when the package is already up-to-date.
+      - name: Ensure Inno Setup 6 is available
+        run: |
+          $iscc = Get-ChildItem 'C:\Program Files*' -Recurse -Filter 'ISCC.exe' -ErrorAction SilentlyContinue |
+                  Select-Object -First 1 -ExpandProperty FullName
+          if ($iscc) {
+            Write-Host "Inno Setup already installed: $iscc"
+          } else {
+            Write-Host "Installing Inno Setup via Chocolatey..."
+            choco install innosetup --yes --no-progress
+          }
+        shell: pwsh
 
       # ── 9. Compile installer ──────────────────────────────────────────────────
       - name: Compile SmartWeightSetup.exe
         run: |
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
+          # Find ISCC.exe under any 'Inno Setup*' folder (handles 6.3, 6.7, etc.)
+          $iscc = Get-ChildItem 'C:\Program Files*' -Recurse -Filter 'ISCC.exe' -ErrorAction SilentlyContinue |
+                  Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { throw 'ISCC.exe not found — Inno Setup installation may have failed' }
 
           & $iscc `
             /DAppVersion="${{ steps.version.outputs.appver }}" `
