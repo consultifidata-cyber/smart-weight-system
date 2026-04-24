@@ -116,6 +116,9 @@ function weightApp() {
     // Worker loading (offline-first with localStorage cache)
     // ══════════════════════════════════════════════════════════════
 
+    _workerRetryCount: 0,
+    _workerRetryId: null,
+
     loadWorkers() {
       var self = this;
       this._fetchWithTimeout(CONFIG.workerApiUrl)
@@ -123,6 +126,8 @@ function weightApp() {
         .then(function (data) {
           if (Array.isArray(data) && data.length > 0) {
             self.workers = data;
+            self._workerRetryCount = 0;
+            if (self._workerRetryId) { clearTimeout(self._workerRetryId); self._workerRetryId = null; }
             try { localStorage.setItem('workers', JSON.stringify(data)); } catch (e) { /* ignore */ }
             return;
           }
@@ -138,6 +143,11 @@ function weightApp() {
               }
             }
           } catch (e) { /* ignore */ }
+          // Retry if still no workers (max 10 retries, 15s apart)
+          if (self.workers.length === 0 && self._workerRetryCount < 10) {
+            self._workerRetryCount++;
+            self._workerRetryId = setTimeout(function () { self.loadWorkers(); }, 15000);
+          }
         });
     },
 

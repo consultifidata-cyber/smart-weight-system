@@ -432,18 +432,54 @@ export class SyncEngine {
   private async checkInitialMasterSync(): Promise<void> {
     const lastSync = this.queries.getMeta('last_master_sync_at');
 
+    let needsPull = false;
     if (!lastSync) {
       logger.info('No master data found, triggering initial pull');
-      await this.pullMasterData();
-      return;
+      needsPull = true;
+    } else {
+      const elapsed = Date.now() - new Date(lastSync).getTime();
+      const staleMs = 24 * 60 * 60 * 1000;
+      if (elapsed > staleMs) {
+        logger.info({ lastSync }, 'Master data stale, triggering refresh');
+        needsPull = true;
+      }
     }
 
-    const elapsed = Date.now() - new Date(lastSync).getTime();
-    const staleMs = 24 * 60 * 60 * 1000;
-    if (elapsed > staleMs) {
-      logger.info({ lastSync }, 'Master data stale, triggering refresh');
-      await this.pullMasterData();
+    if (!needsPull) return;
+
+    await this.pullMasterData();
+
+    // If workers are still empty after first pull, retry with backoff
+    const workers = this.queries.getWorkers();
+    if (workers.length === 0) {
+      this.retryMasterDataUntilWorkers();
     }
+  }
+
+  private retryMasterDataUntilWorkers(): void {
+    const retryDelayMs = 30_000; // 30 seconds
+    const maxRetries = 10;
+    let attempt = 0;
+
+    const retry = async () => {
+      attempt++;
+      logger.info({ attempt, maxRetries }, 'Retrying master data pull (workers empty)');
+
+      await this.pullMasterData();
+      const workers = this.queries.getWorkers();
+      if (workers.length > 0) {
+        logger.info({ workerCount: workers.length }, 'Workers populated after retry');
+        return;
+      }
+
+      if (attempt < maxRetries) {
+        setTimeout(retry, retryDelayMs);
+      } else {
+        logger.warn('Max master data retries reached, workers still empty — will rely on hourly sync');
+      }
+    };
+
+    setTimeout(retry, retryDelayMs);
   }
 
   async pullMasterData(): Promise<{ products: number; items: number }> {
