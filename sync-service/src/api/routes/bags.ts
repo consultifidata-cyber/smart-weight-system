@@ -20,7 +20,7 @@ const router = Router();
 router.post('/add', (req: Request, res: Response) => {
   const { queries, config } = req.ctx;
 
-  const { pack_config_id, weight_gm } = req.body;
+  const { pack_config_id, weight_gm, worker_code_1, worker_code_2 } = req.body;
 
   if (!pack_config_id) {
     res.status(400).json({ status: 'error', error: 'pack_config_id is required' });
@@ -29,6 +29,11 @@ router.post('/add', (req: Request, res: Response) => {
 
   if (weight_gm === undefined || weight_gm === null || typeof weight_gm !== 'number' || weight_gm <= 0 || !isFinite(weight_gm)) {
     res.status(400).json({ status: 'error', error: 'Valid weight_gm (positive number) is required' });
+    return;
+  }
+
+  if (!worker_code_1) {
+    res.status(400).json({ status: 'error', error: 'worker_code_1 is required' });
     return;
   }
 
@@ -111,6 +116,8 @@ router.post('/add', (req: Request, res: Response) => {
       line_id: null,
       synced: 0,
       created_at: now,
+      worker_code_1: worker_code_1 || null,
+      worker_code_2: worker_code_2 || null,
     };
 
     queries.insertBag(bag);

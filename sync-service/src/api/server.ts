@@ -4,6 +4,7 @@ import { entriesRouter } from './routes/entries.js';
 import { productsRouter } from './routes/products.js';
 import { syncRouter } from './routes/sync.js';
 import { bagsRouter } from './routes/bags.js';
+import { workersRouter } from './routes/workers.js';
 import logger from '../utils/logger.js';
 import type { Queries } from '../db/queries.js';
 import type { SyncServiceConfig } from '../config.js';
@@ -49,6 +50,7 @@ export function createServer(
   app.use('/products', productsRouter);
   app.use('/sync', syncRouter);
   app.use('/bags', bagsRouter);
+  app.use('/workers', workersRouter);
 
   // Root health check
   app.get('/health', (_req: Request, res: Response) => {

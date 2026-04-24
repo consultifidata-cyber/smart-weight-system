@@ -106,6 +106,8 @@ export interface FGBag {
   line_id: number | null;          // Django FGProductionLine.pk (null if offline)
   synced: number;                  // 0 or 1 (SQLite boolean)
   created_at: string;
+  worker_code_1: string | null;
+  worker_code_2: string | null;
 }
 
 export interface FGSessionWithBags extends FGSession {
@@ -177,6 +179,13 @@ export interface ItemMaster {
   uom: string | null;
   category: string | null;
   updated_at?: string;
+}
+
+export interface WorkerMaster {
+  worker_id: number;
+  worker_code: string;
+  worker_name: string;
+  shift: string;
 }
 
 export interface ProductForDropdown {

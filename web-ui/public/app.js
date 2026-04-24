@@ -21,6 +21,11 @@ function weightApp() {
     products: [],
     selectedPackId: '',
 
+    // ── Workers ──
+    workers: [],
+    selectedWorker1: '',
+    selectedWorker2: '',
+
     // ── Today's bag count ──
     totalBagsToday: 0,
     bagsByProduct: [], // [{ pack_config_id, pack_name, count }]
@@ -54,6 +59,7 @@ function weightApp() {
     init() {
       this.counter = new CounterManager();
       this.loadProducts();
+      this.loadWorkers();
       this.refreshTodaySummary();
       this.startPolling();
       try {
@@ -62,6 +68,12 @@ function weightApp() {
           var parsed = JSON.parse(cached);
           if (Array.isArray(parsed)) this.recentProducts = parsed;
         }
+      } catch (e) { /* ignore */ }
+      try {
+        var w1 = localStorage.getItem('selectedWorker1');
+        if (w1) this.selectedWorker1 = w1;
+        var w2 = localStorage.getItem('selectedWorker2');
+        if (w2) this.selectedWorker2 = w2;
       } catch (e) { /* ignore */ }
     },
 
@@ -94,6 +106,35 @@ function weightApp() {
               var parsed = JSON.parse(cached);
               if (Array.isArray(parsed) && parsed.length > 0) {
                 self.products = parsed;
+              }
+            }
+          } catch (e) { /* ignore */ }
+        });
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // Worker loading (offline-first with localStorage cache)
+    // ══════════════════════════════════════════════════════════════
+
+    loadWorkers() {
+      var self = this;
+      this._fetchWithTimeout(CONFIG.workerApiUrl)
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (Array.isArray(data) && data.length > 0) {
+            self.workers = data;
+            try { localStorage.setItem('workers', JSON.stringify(data)); } catch (e) { /* ignore */ }
+            return;
+          }
+          throw new Error('Empty worker list');
+        })
+        .catch(function () {
+          try {
+            var cached = localStorage.getItem('workers');
+            if (cached) {
+              var parsed = JSON.parse(cached);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                self.workers = parsed;
               }
             }
           } catch (e) { /* ignore */ }
@@ -186,6 +227,8 @@ function weightApp() {
             body: JSON.stringify({
               pack_config_id: Number(this.selectedPackId),
               weight_gm: weightGm,
+              worker_code_1: this.selectedWorker1,
+              worker_code_2: this.selectedWorker2 || null,
             }),
           }
         );
@@ -358,8 +401,14 @@ function weightApp() {
     // Display helpers
     // ══════════════════════════════════════════════════════════════
 
+    get filteredWorkers2() {
+      var w1 = this.selectedWorker1;
+      if (!w1) return this.workers;
+      return this.workers.filter(function (w) { return w.worker_code !== w1; });
+    },
+
     get canPrint() {
-      return this.state === 'IDLE' && this.weightStatus === 'ok' && this.stable && this.selectedPackId;
+      return this.state === 'IDLE' && this.weightStatus === 'ok' && this.stable && this.selectedPackId && this.printerConnected && this.selectedWorker1;
     },
 
     get weightDisplay() {
@@ -407,7 +456,9 @@ function weightApp() {
       if (this.state === 'PRINTED') return 'Printed!';
       if (this.state === 'PRINT_FAILED') return 'Retry Print';
       if (this.weightStatus !== 'ok') return 'Scale Disconnected';
+      if (!this.printerConnected) return 'Printer Disconnected';
       if (!this.selectedPackId) return 'Select Product';
+      if (!this.selectedWorker1) return 'Select Worker';
       if (!this.stable) return 'Waiting for Stable Weight...';
       return 'PRINT';
     },
@@ -455,6 +506,19 @@ function weightApp() {
       if (!found) {
         this.bagsByProduct.push({ pack_name: packName, count: 1 });
       }
+    },
+
+    onWorker1Change() {
+      try { localStorage.setItem('selectedWorker1', this.selectedWorker1); } catch (e) { /* ignore */ }
+      // Clear worker 2 if same as worker 1
+      if (this.selectedWorker2 && this.selectedWorker2 === this.selectedWorker1) {
+        this.selectedWorker2 = '';
+        try { localStorage.setItem('selectedWorker2', ''); } catch (e) { /* ignore */ }
+      }
+    },
+
+    onWorker2Change() {
+      try { localStorage.setItem('selectedWorker2', this.selectedWorker2); } catch (e) { /* ignore */ }
     },
 
     _fetchWithTimeout(url, options, timeoutMs) {

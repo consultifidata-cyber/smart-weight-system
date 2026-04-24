@@ -9,6 +9,7 @@ import type {
   SyncStatus,
   FGPackConfig,
   ItemMaster,
+  WorkerMaster,
   ProductForDropdown,
 } from '../types.js';
 
@@ -28,6 +29,7 @@ export class Queries {
 
   // ── Master data statements ──
   private _getProducts!: Database.Statement;
+  private _getWorkers!: Database.Statement;
   private _getMeta!: Database.Statement;
   private _upsertMeta!: Database.Statement;
 
@@ -133,6 +135,10 @@ export class Queries {
       FROM fg_pack_config p
       ORDER BY p.pack_name
     `);
+
+    this._getWorkers = this.db.prepare(
+      `SELECT worker_id, worker_code, worker_name, shift FROM worker_master ORDER BY worker_name`
+    );
 
     this._getMeta = this.db.prepare(
       `SELECT value FROM sync_meta WHERE key = ?`
@@ -281,8 +287,8 @@ export class Queries {
       INSERT INTO fg_bag (
         bag_id, session_id, bag_number, item_id, pack_config_id,
         offer_id, actual_weight_gm, qr_code, batch_no, note,
-        line_id, synced, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        line_id, synced, created_at, worker_code_1, worker_code_2
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this._getBagsBySession = this.db.prepare(
@@ -528,6 +534,24 @@ export class Queries {
     this._markSessionClosedExternally.run(sessionId);
   }
 
+  /** Atomically close old session + insert new session + move unsynced bags */
+  rolloverSession(oldSessionId: string, newSession: FGSession): number {
+    let moved = 0;
+    this.db.transaction(() => {
+      this._markSessionClosedExternally.run(oldSessionId);
+      this._insertSession.run(
+        newSession.session_id, newSession.doc_id, newSession.prod_no, newSession.day_seq,
+        newSession.station_id, newSession.plant_id, newSession.entry_date, newSession.shift,
+        newSession.item_id, newSession.pack_config_id, newSession.pack_name,
+        newSession.status, newSession.is_offline, newSession.idempotency_key,
+        newSession.created_at, newSession.sync_status,
+      );
+      const result = this._moveBagsToSession.run(newSession.session_id, oldSessionId);
+      moved = result.changes;
+    })();
+    return moved;
+  }
+
   /** Get today's bag summary grouped by pack_config for display */
   getBagsSummaryToday(stationId: string, date: string): Array<{ pack_config_id: number; pack_name: string; count: number }> {
     const rows = this.db.prepare(`
@@ -551,6 +575,7 @@ export class Queries {
       bag.item_id, bag.pack_config_id, bag.offer_id,
       bag.actual_weight_gm, bag.qr_code, bag.batch_no, bag.note,
       bag.line_id, bag.synced, bag.created_at,
+      bag.worker_code_1 ?? null, bag.worker_code_2 ?? null,
     );
   }
 
@@ -602,6 +627,23 @@ export class Queries {
       `);
       for (const i of items) {
         insert.run(i.item_id, i.item_name, i.item_code, i.uom, i.category);
+      }
+    })();
+  }
+
+  getWorkers(): WorkerMaster[] {
+    return this._getWorkers.all() as WorkerMaster[];
+  }
+
+  replaceWorkerMasters(workers: WorkerMaster[]): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM worker_master').run();
+      const insert = this.db.prepare(`
+        INSERT INTO worker_master (worker_id, worker_code, worker_name, shift)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const w of workers) {
+        insert.run(w.worker_id, w.worker_code, w.worker_name, w.shift);
       }
     })();
   }

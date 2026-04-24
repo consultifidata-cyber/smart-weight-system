@@ -35,7 +35,7 @@ const logsDir = path.join(root, 'logs');
 const CRASH_LOOP_LOG_THRESHOLD = 10;       // after N consecutive fast exits, throttle logs
 const CRASH_LOOP_LOG_INTERVAL_MS = 5 * 60 * 1000; // one line every 5 min when throttled
 const STATUS_WRITE_INTERVAL_MS = 10 * 1000;
-const SHUTDOWN_DRAIN_MS = 5000;             // wait this long for services to exit cleanly
+const SHUTDOWN_DRAIN_MS = 10000;            // wait this long for services to exit cleanly
 const MIN_UPTIME_DEFAULT_MS = 10 * 1000;    // "stable" threshold if not set on the app
 
 // ----------------------------------------------------------------
@@ -102,6 +102,28 @@ function writeStatusFile() {
 }
 
 // ----------------------------------------------------------------
+// Log rotation (size-based, keep last MAX_LOG_ROTATIONS files)
+// ----------------------------------------------------------------
+const MAX_LOG_SIZE = 10 * 1024 * 1024;  // 10 MB
+const MAX_LOG_ROTATIONS = 3;
+const LOG_ROTATION_CHECK_MS = 60 * 1000; // check every 60s
+
+function rotateLog(logPath) {
+  try {
+    const stat = fs.statSync(logPath);
+    if (stat.size < MAX_LOG_SIZE) return false;
+  } catch { return false; }
+
+  // Rotate: .log.2 → .log.3, .log.1 → .log.2, .log → .log.1
+  for (let i = MAX_LOG_ROTATIONS; i >= 1; i--) {
+    const from = i === 1 ? logPath : `${logPath}.${i - 1}`;
+    const to = `${logPath}.${i}`;
+    try { fs.renameSync(from, to); } catch { /* file may not exist */ }
+  }
+  return true;
+}
+
+// ----------------------------------------------------------------
 // Spawn a single service
 // ----------------------------------------------------------------
 function startApp(appDef) {
@@ -124,11 +146,33 @@ function startApp(appDef) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  // Rotate logs if needed before opening streams
+  rotateLog(appDef.out_file);
+  rotateLog(appDef.error_file);
+
   // Pipe stdout/stderr to log files (append mode)
-  const outStream = fs.createWriteStream(appDef.out_file, { flags: 'a' });
-  const errStream = fs.createWriteStream(appDef.error_file, { flags: 'a' });
+  let outStream = fs.createWriteStream(appDef.out_file, { flags: 'a' });
+  let errStream = fs.createWriteStream(appDef.error_file, { flags: 'a' });
   child.stdout.pipe(outStream);
   child.stderr.pipe(errStream);
+
+  // Periodic log rotation for long-running services
+  const rotationTimer = setInterval(() => {
+    if (rotateLog(appDef.out_file)) {
+      child.stdout.unpipe(outStream);
+      outStream.end();
+      outStream = fs.createWriteStream(appDef.out_file, { flags: 'a' });
+      child.stdout.pipe(outStream);
+      log(`Rotated ${path.basename(appDef.out_file)} (exceeded ${MAX_LOG_SIZE / 1024 / 1024}MB)`);
+    }
+    if (rotateLog(appDef.error_file)) {
+      child.stderr.unpipe(errStream);
+      errStream.end();
+      errStream = fs.createWriteStream(appDef.error_file, { flags: 'a' });
+      child.stderr.pipe(errStream);
+      log(`Rotated ${path.basename(appDef.error_file)} (exceeded ${MAX_LOG_SIZE / 1024 / 1024}MB)`);
+    }
+  }, LOG_ROTATION_CHECK_MS);
 
   // Preserve prior counters across restarts
   const prev = children.get(appDef.name);
@@ -153,6 +197,7 @@ function startApp(appDef) {
   });
 
   child.on('exit', (code, signal) => {
+    clearInterval(rotationTimer);
     outStream.end();
     errStream.end();
 

@@ -201,6 +201,22 @@ html, body {
   pointer-events: none;
 }
 
+/* ── Worker Selectors ── */
+
+.worker-row {
+  display: flex;
+  gap: 8px;
+}
+
+.worker-select-wrapper {
+  flex: 1;
+}
+
+.worker-select {
+  min-height: 48px;
+  font-size: 1rem;
+}
+
 /* ── Last Bag Info + Reprint ── */
 
 .last-bag-row {

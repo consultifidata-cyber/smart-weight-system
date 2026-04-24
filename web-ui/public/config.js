@@ -4,6 +4,7 @@ var CONFIG = {
   printServiceUrl: 'http://localhost:5001',
   syncServiceUrl: 'http://localhost:5002',
   productApiUrl: 'http://localhost:5002/products',
+  workerApiUrl: 'http://localhost:5002/workers',
   weightPollMs: 1000,
   healthPollMs: 10000,
   autoResetMs: 2000,

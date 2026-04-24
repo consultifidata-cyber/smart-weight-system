@@ -35,7 +35,7 @@ describe('POST /bags/add', () => {
   it('returns 201 with qr_code, bag_number, pack_name', async () => {
     const res = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 510 });
+      .send({ pack_config_id: 10, weight_gm: 510, worker_code_1: 'W1' });
 
     assert.equal(res.status, 201);
     assert.equal(res.body.status, 'ok');
@@ -59,7 +59,7 @@ describe('POST /bags/add', () => {
   it('returns 400 for unknown pack_config_id', async () => {
     const res = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 999, weight_gm: 500 });
+      .send({ pack_config_id: 999, weight_gm: 500, worker_code_1: 'W1' });
 
     assert.equal(res.status, 400);
     assert.ok(res.body.error.includes('Unknown pack_config_id'));
@@ -68,7 +68,7 @@ describe('POST /bags/add', () => {
   it('auto-creates session on first bag for a product', async () => {
     const res = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 510 });
+      .send({ pack_config_id: 10, weight_gm: 510, worker_code_1: 'W1' });
 
     assert.equal(res.status, 201);
     assert.equal(res.body.day_seq, 1);
@@ -84,11 +84,11 @@ describe('POST /bags/add', () => {
   it('reuses existing session for same product on same day', async () => {
     const r1 = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 510 });
+      .send({ pack_config_id: 10, weight_gm: 510, worker_code_1: 'W1' });
 
     const r2 = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 520 });
+      .send({ pack_config_id: 10, weight_gm: 520, worker_code_1: 'W1' });
 
     assert.equal(r1.status, 201);
     assert.equal(r2.status, 201);
@@ -107,11 +107,11 @@ describe('POST /bags/add', () => {
   it('creates separate sessions for different products', async () => {
     const r1 = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 510 });
+      .send({ pack_config_id: 10, weight_gm: 510, worker_code_1: 'W1' });
 
     const r2 = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 20, weight_gm: 200 });
+      .send({ pack_config_id: 20, weight_gm: 200, worker_code_1: 'W1' });
 
     assert.equal(r1.status, 201);
     assert.equal(r2.status, 201);
@@ -127,9 +127,9 @@ describe('POST /bags/add', () => {
   });
 
   it('increments bag_number within same product session', async () => {
-    const r1 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500 });
-    const r2 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505 });
-    const r3 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 510 });
+    const r1 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' });
+    const r2 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505, worker_code_1: 'W1' });
+    const r3 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 510, worker_code_1: 'W1' });
 
     assert.equal(r1.body.bag_number, 1);
     assert.equal(r2.body.bag_number, 2);
@@ -141,7 +141,7 @@ describe('POST /bags/add', () => {
   it('generates correct QR code format (PREFIX-DDMMYY-SEQ-BAG)', async () => {
     const res = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 500 });
+      .send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' });
 
     // QR format: PREFIX-DDMMYY-SEQ02d-BAG03d
     assert.match(res.body.qr_code, /^[A-Z0-9]+-\d{6}-\d{2}-\d{3}$/);
@@ -149,13 +149,13 @@ describe('POST /bags/add', () => {
 
   it('bag_number resets per product session', async () => {
     // Add 2 bags for product A
-    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500 });
-    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505 });
+    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' });
+    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505, worker_code_1: 'W1' });
 
     // Add 1 bag for product B — bag_number should start at 1
     const res = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 20, weight_gm: 200 });
+      .send({ pack_config_id: 20, weight_gm: 200, worker_code_1: 'W1' });
 
     assert.equal(res.body.bag_number, 1);
     assert.equal(res.body.session_bags, 1);
@@ -163,18 +163,17 @@ describe('POST /bags/add', () => {
     assert.equal(res.body.total_bags_today, 3);
   });
 
-  it('handles null weight_gm gracefully', async () => {
+  it('rejects missing weight_gm', async () => {
     const res = await request(app)
       .post('/bags/add')
       .send({ pack_config_id: 10 });
 
-    assert.equal(res.status, 201);
-    assert.equal(res.body.bag_number, 1);
+    assert.equal(res.status, 400);
   });
 
   it('day_seq increments per new product session', async () => {
-    const r1 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500 });
-    const r2 = await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 200 });
+    const r1 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' });
+    const r2 = await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 200, worker_code_1: 'W1' });
 
     assert.equal(r1.body.day_seq, 1);
     assert.equal(r2.body.day_seq, 2);
@@ -184,7 +183,7 @@ describe('POST /bags/add', () => {
     // Add a bag
     const r1 = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 500 });
+      .send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' });
     assert.equal(r1.status, 201);
 
     // Manually insert a bag with the same QR to trigger conflict
@@ -205,6 +204,8 @@ describe('POST /bags/add', () => {
         line_id: null,
         synced: 0,
         created_at: new Date().toISOString(),
+        worker_code_1: null,
+        worker_code_2: null,
       });
       assert.fail('Should have thrown UNIQUE constraint error');
     } catch (err: any) {
@@ -230,9 +231,9 @@ describe('GET /bags/today', () => {
   });
 
   it('returns correct count after adding bags', async () => {
-    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500 });
-    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505 });
-    await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 200 });
+    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' });
+    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505, worker_code_1: 'W1' });
+    await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 200, worker_code_1: 'W1' });
 
     const res = await request(app).get('/bags/today');
 
@@ -276,8 +277,8 @@ describe('POST /sync/flush', () => {
 
   it('closes open sessions and attempts push', async () => {
     // Add some bags to create open sessions
-    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500 });
-    await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 200 });
+    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' });
+    await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 200, worker_code_1: 'W1' });
 
     // Verify 2 open sessions exist
     const beforeSessions = queries.listOpenSessions('ST01');
@@ -302,11 +303,11 @@ describe('POST /sync/flush', () => {
 describe('Multi-product interleaved flow', () => {
   it('handles interleaved bags for different products correctly', async () => {
     // Simulate real factory: bags arrive in random product order
-    const r1 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500 }); // Product A bag 1
-    const r2 = await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 200 }); // Product B bag 1
-    const r3 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505 }); // Product A bag 2
-    const r4 = await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 195 }); // Product B bag 2
-    const r5 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 510 }); // Product A bag 3
+    const r1 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' }); // Product A bag 1
+    const r2 = await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 200, worker_code_1: 'W1' }); // Product B bag 1
+    const r3 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505, worker_code_1: 'W1' }); // Product A bag 2
+    const r4 = await request(app).post('/bags/add').send({ pack_config_id: 20, weight_gm: 195, worker_code_1: 'W1' }); // Product B bag 2
+    const r5 = await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 510, worker_code_1: 'W1' }); // Product A bag 3
 
     // Product A: bags 1,2,3 — same session, same day_seq
     assert.equal(r1.body.bag_number, 1);
@@ -338,28 +339,26 @@ describe('Multi-product interleaved flow', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('POST /bags/add (weight edge cases)', () => {
-  it('accepts zero weight', async () => {
+  it('rejects zero weight', async () => {
     const res = await request(app)
       .post('/bags/add')
       .send({ pack_config_id: 10, weight_gm: 0 });
 
-    assert.equal(res.status, 201);
-    assert.equal(res.body.bag_number, 1);
+    assert.equal(res.status, 400);
   });
 
-  it('accepts negative weight (scale tare offset)', async () => {
+  it('rejects negative weight', async () => {
     const res = await request(app)
       .post('/bags/add')
       .send({ pack_config_id: 10, weight_gm: -5 });
 
-    assert.equal(res.status, 201);
-    assert.equal(res.body.bag_number, 1);
+    assert.equal(res.status, 400);
   });
 
   it('accepts very large weight', async () => {
     const res = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 999999 });
+      .send({ pack_config_id: 10, weight_gm: 999999, worker_code_1: 'W1' });
 
     assert.equal(res.status, 201);
     assert.equal(res.body.bag_number, 1);
@@ -368,19 +367,17 @@ describe('POST /bags/add (weight edge cases)', () => {
   it('accepts decimal weight', async () => {
     const res = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 10, weight_gm: 500.75 });
+      .send({ pack_config_id: 10, weight_gm: 500.75, worker_code_1: 'W1' });
 
     assert.equal(res.status, 201);
   });
 
-  it('stores null when weight_gm is undefined', async () => {
+  it('rejects missing weight_gm', async () => {
     const res = await request(app)
       .post('/bags/add')
       .send({ pack_config_id: 10 });
 
-    assert.equal(res.status, 201);
-    // Bag should still be created with null weight
-    assert.equal(res.body.bag_number, 1);
+    assert.equal(res.status, 400);
   });
 });
 
@@ -392,7 +389,7 @@ describe('POST /bags/add (malformed input)', () => {
   it('returns 400 for string pack_config_id that does not match any product', async () => {
     const res = await request(app)
       .post('/bags/add')
-      .send({ pack_config_id: 'abc', weight_gm: 500 });
+      .send({ pack_config_id: 'abc', weight_gm: 500, worker_code_1: 'W1' });
 
     // String 'abc' won't match any pack_config_id (they're numbers)
     assert.equal(res.status, 400);
@@ -436,7 +433,7 @@ describe('POST /bags/add (high volume)', () => {
       promises.push(
         request(app)
           .post('/bags/add')
-          .send({ pack_config_id: 10, weight_gm: 500 + i })
+          .send({ pack_config_id: 10, weight_gm: 500 + i, worker_code_1: 'W1' })
       );
     }
 
@@ -446,7 +443,7 @@ describe('POST /bags/add (high volume)', () => {
     for (let i = 0; i < 20; i++) {
       const res = await request(app)
         .post('/bags/add')
-        .send({ pack_config_id: 10, weight_gm: 500 + i });
+        .send({ pack_config_id: 10, weight_gm: 500 + i, worker_code_1: 'W1' });
       results.push(res);
     }
 

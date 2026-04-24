@@ -55,7 +55,7 @@ async function main(): Promise<void> {
       setTimeout(() => {
         logger.warn('Graceful shutdown timed out, forcing exit');
         process.exit(1);
-      }, 4000);
+      }, 8000);
     };
 
     process.on('SIGINT', () => shutdown('SIGINT'));

@@ -84,6 +84,32 @@
           <span class="select-arrow">&#9662;</span>
         </div>
 
+        <!-- Worker Selectors -->
+        <div class="worker-row">
+          <div class="select-wrapper worker-select-wrapper">
+            <select class="product-select worker-select" x-model="selectedWorker1"
+              @change="onWorker1Change()"
+              :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
+              <option value="">-- Worker 1 * --</option>
+              <template x-for="w in workers" :key="w.worker_code">
+                <option :value="w.worker_code" x-text="w.worker_name + ' (' + w.worker_code + ')'"></option>
+              </template>
+            </select>
+            <span class="select-arrow">&#9662;</span>
+          </div>
+          <div class="select-wrapper worker-select-wrapper">
+            <select class="product-select worker-select" x-model="selectedWorker2"
+              @change="onWorker2Change()"
+              :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
+              <option value="">-- Worker 2 --</option>
+              <template x-for="w in filteredWorkers2" :key="w.worker_code">
+                <option :value="w.worker_code" x-text="w.worker_name + ' (' + w.worker_code + ')'"></option>
+              </template>
+            </select>
+            <span class="select-arrow">&#9662;</span>
+          </div>
+        </div>
+
         <!-- Last Bag Info + Reprint -->
         <div class="last-bag-row" x-show="lastBag" x-transition>
           <div class="last-bag-card">

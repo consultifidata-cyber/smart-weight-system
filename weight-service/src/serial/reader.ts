@@ -10,6 +10,9 @@ const MAX_DELAY_MS = 30000;
 const LOG_EVERY_ATTEMPT_THRESHOLD = 10;          // log first N attempts in detail
 const LOG_THROTTLE_INTERVAL_MS = 5 * 60 * 1000;  // then one line every 5 min
 const AUTO_DETECT_AFTER_ATTEMPTS = 3;            // scan ports after this many failures
+const OPEN_TIMEOUT_MS = 10000;                   // timeout for port.open()
+const CLOSE_TIMEOUT_MS = 5000;                   // timeout for port.close()
+const LIST_TIMEOUT_MS = 5000;                    // timeout for SerialPort.list()
 
 // Known USB-to-serial adapter manufacturers (case-insensitive match)
 const KNOWN_MANUFACTURERS = ['ftdi', 'prolific', 'ch340', 'wch', 'silicon labs', 'qinheng'];
@@ -83,7 +86,20 @@ export class WeightReader extends EventEmitter {
     this.port.on('close', () => this._onClose());
 
     return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          // Force-close the port to prevent late callback
+          try { this.port?.close(); } catch { /* ignore */ }
+          reject(new Error(`Timeout opening ${this.serialConfig.port} (${OPEN_TIMEOUT_MS}ms)`));
+        }
+      }, OPEN_TIMEOUT_MS);
+
       this.port!.open((err: Error | null) => {
+        if (settled) return; // timeout already fired
+        settled = true;
+        clearTimeout(timer);
         if (err) {
           logger.error({ port: this.serialConfig.port, err: err.message }, 'Failed to open serial port');
           reject(err);
@@ -98,6 +114,12 @@ export class WeightReader extends EventEmitter {
   }
 
   async openWithRetry(): Promise<void> {
+    // Clear any stale reconnect timer from a previous cycle
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     // Infinite retry: loop until port opens successfully or service shuts down.
     // Log first N attempts in detail, then throttle to one line every 5 min
     // to keep logs bounded during long offline periods (e.g. overnight power cut).
@@ -155,7 +177,12 @@ export class WeightReader extends EventEmitter {
 
     let ports: Awaited<ReturnType<typeof SerialPort.list>>;
     try {
-      ports = await SerialPort.list();
+      ports = await Promise.race([
+        SerialPort.list(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`SerialPort.list() timed out (${LIST_TIMEOUT_MS}ms)`)), LIST_TIMEOUT_MS),
+        ),
+      ]);
     } catch (err) {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to list serial ports');
       return false;
@@ -243,7 +270,12 @@ export class WeightReader extends EventEmitter {
     }
     if (this.port && this.port.isOpen) {
       return new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          logger.warn('Serial port close timed out, forcing');
+          resolve();
+        }, CLOSE_TIMEOUT_MS);
         this.port!.close((err: Error | null) => {
+          clearTimeout(timer);
           if (err) logger.warn({ err: err.message }, 'Error closing serial port');
           resolve();
         });

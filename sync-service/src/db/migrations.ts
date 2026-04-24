@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import logger from '../utils/logger.js';
 
-const LATEST_VERSION = 4;
+const LATEST_VERSION = 5;
 
 const migrations: Record<number, (db: Database.Database) => void> = {
   // Version 0 → 1: Core entry tables
@@ -137,6 +137,22 @@ const migrations: Record<number, (db: Database.Database) => void> = {
 
       CREATE INDEX IF NOT EXISTS idx_fg_session_auto
         ON fg_session(station_id, pack_config_id, entry_date, status);
+    `);
+  },
+
+  // Version 4 → 5: Worker master cache + per-bag worker codes
+  5: (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS worker_master (
+        worker_id    INTEGER PRIMARY KEY,
+        worker_code  TEXT NOT NULL UNIQUE,
+        worker_name  TEXT NOT NULL,
+        shift        TEXT NOT NULL DEFAULT '',
+        updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      ALTER TABLE fg_bag ADD COLUMN worker_code_1 TEXT;
+      ALTER TABLE fg_bag ADD COLUMN worker_code_2 TEXT;
     `);
   },
 };

@@ -66,16 +66,16 @@ async function main(): Promise<void> {
   });
 
   // 7. Graceful shutdown
-  const shutdown = async (signal: string): Promise<void> => {
+  const shutdown = (signal: string): void => {
     logger.info({ signal }, 'Shutting down...');
     if (simulator) simulator.stop();
-    await weightReader.close();
-    server.close(() => {
+    server.close(async () => {
+      await weightReader.close();
       logger.info('Weight service stopped');
       process.exit(0);
     });
-    // Force exit after 5s if graceful shutdown stalls
-    setTimeout(() => process.exit(1), 5000);
+    // Force exit after 8s if graceful shutdown stalls
+    setTimeout(() => process.exit(1), 8000);
   };
 
   process.on('SIGINT', () => shutdown('SIGINT'));

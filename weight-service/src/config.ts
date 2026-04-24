@@ -12,7 +12,7 @@ const config: AppConfig = Object.freeze({
   stationId: process.env.STATION_ID || 'ST01',
 
   serial: Object.freeze({
-    port: process.env.SERIAL_PORT || 'COM3',
+    port: process.env.SERIAL_PORT || (process.platform === 'win32' ? 'COM3' : '/dev/ttyUSB0'),
     baudRate: parseInt(process.env.SERIAL_BAUD_RATE!, 10) || 9600,
     dataBits: parseInt(process.env.SERIAL_DATA_BITS!, 10) || 8,
     parity: process.env.SERIAL_PARITY || 'none',

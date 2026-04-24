@@ -158,8 +158,8 @@ describe('POST /sync/flush (edge cases)', () => {
 describe('GET /sync/status (with data)', () => {
   it('reflects bag and session counts after activity', async () => {
     // Add some bags
-    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500 });
-    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505 });
+    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 500, worker_code_1: 'W1' });
+    await request(app).post('/bags/add').send({ pack_config_id: 10, weight_gm: 505, worker_code_1: 'W1' });
 
     const res = await request(app).get('/sync/status');
 

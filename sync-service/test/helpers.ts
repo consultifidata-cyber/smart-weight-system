@@ -3,7 +3,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { Queries } from '../src/db/queries.js';
 import { createServer } from '../src/api/server.js';
 import { SyncEngine } from '../src/sync/engine.js';
-import type { FGSession, FGBag, FGPackConfig, ItemMaster } from '../src/types.js';
+import type { FGSession, FGBag, FGPackConfig, ItemMaster, WorkerMaster } from '../src/types.js';
 import type { SyncServiceConfig } from '../src/config.js';
 import type express from 'express';
 
@@ -55,6 +55,7 @@ export class MockDjangoClient {
 
   masterConfigs: FGPackConfig[] = [];
   masterItems: ItemMaster[] = [];
+  masterWorkers: WorkerMaster[] = [];
 
   // Track calls
   calls: { method: string; args: unknown[] }[] = [];
@@ -78,6 +79,12 @@ export class MockDjangoClient {
     this.calls.push({ method: 'fetchItemMasters', args: [] });
     if (this.shouldFail) throw new Error(this.failError);
     return this.masterItems;
+  }
+
+  async fetchWorkerMasters(): Promise<WorkerMaster[]> {
+    this.calls.push({ method: 'fetchWorkerMasters', args: [] });
+    if (this.shouldFail) throw new Error(this.failError);
+    return this.masterWorkers;
   }
 
   async openSession(data: unknown) {
@@ -189,6 +196,8 @@ export function makeBag(sessionId: string, overrides?: Partial<FGBag>): FGBag {
     line_id: null,
     synced: 0,
     created_at: new Date().toISOString(),
+    worker_code_1: null,
+    worker_code_2: null,
     ...overrides,
   };
 }

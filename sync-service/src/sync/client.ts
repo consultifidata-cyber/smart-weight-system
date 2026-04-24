@@ -2,6 +2,7 @@ import logger from '../utils/logger.js';
 import type {
   FGPackConfig,
   ItemMaster,
+  WorkerMaster,
   SyncResult,
   OpenSessionResponse,
   AddBagResponse,
@@ -27,7 +28,7 @@ export class DjangoClient {
   }
 
   get isConfigured(): boolean {
-    return !!this.serverUrl;
+    return !!this.serverUrl && !!this.apiToken;
   }
 
   private get authHeaders(): Record<string, string> {
@@ -90,6 +91,22 @@ export class DjangoClient {
     return data.items;
   }
 
+  async fetchWorkerMasters(): Promise<WorkerMaster[]> {
+    if (!this.isConfigured) return [];
+
+    const response = await fetch(`${this.serverUrl}/api/station/worker-masters/`, {
+      headers: this.authHeaders,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch worker masters: ${response.status}`);
+    }
+
+    const data = await response.json() as { workers: WorkerMaster[] };
+    return data.workers;
+  }
+
   // ════════════════════════════════════════════════════════════════════════
   // Session lifecycle
   // ════════════════════════════════════════════════════════════════════════
@@ -124,6 +141,8 @@ export class DjangoClient {
     offer_id?: number | null;
     batch_no?: string | null;
     note?: string | null;
+    worker_code_1?: string | null;
+    worker_code_2?: string | null;
   }): Promise<AddBagResponse> {
     const response = await fetch(`${this.serverUrl}/api/station/add-bag/`, {
       method: 'POST',
@@ -172,6 +191,8 @@ export class DjangoClient {
       qr_code: string;
       batch_no?: string | null;
       note?: string | null;
+      worker_code_1?: string | null;
+      worker_code_2?: string | null;
     }>;
   }): Promise<SyncResult> {
     if (!this.isConfigured) {

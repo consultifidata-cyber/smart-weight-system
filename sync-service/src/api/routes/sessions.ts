@@ -68,11 +68,14 @@ router.post('/open', async (req: Request, res: Response) => {
     const match = products.find(p => p.pack_id === pack_config_id);
     packName = match?.pack_name || 'FG';
 
-    // Allocate offline day_seq (use a simple counter within the range)
+    // Allocate offline day_seq (use a simple counter within the range, wraps on overflow)
     const lastUsed = queries.getMeta('offline_day_seq_counter');
-    daySeq = lastUsed
-      ? Math.min(parseInt(lastUsed, 10) + 1, config.offlineDaySeqEnd)
-      : config.offlineDaySeqStart;
+    if (lastUsed) {
+      const next = parseInt(lastUsed, 10) + 1;
+      daySeq = next > config.offlineDaySeqEnd ? config.offlineDaySeqStart : next;
+    } else {
+      daySeq = config.offlineDaySeqStart;
+    }
     queries.setMeta('offline_day_seq_counter', String(daySeq));
   }
 
@@ -144,6 +147,8 @@ router.post('/:sessionId/add-bag', async (req: Request, res: Response) => {
     offer_id = null,
     batch_no = null,
     note = null,
+    worker_code_1 = null,
+    worker_code_2 = null,
   } = req.body;
 
   const bagId = randomUUID();
@@ -173,6 +178,8 @@ router.post('/:sessionId/add-bag', async (req: Request, res: Response) => {
         offer_id: offer_id,
         batch_no: batch_no,
         note: note,
+        worker_code_1,
+        worker_code_2,
       });
       lineId = resp.line_id;
       synced = 1;
@@ -198,6 +205,8 @@ router.post('/:sessionId/add-bag', async (req: Request, res: Response) => {
       line_id: lineId,
       synced: synced,
       created_at: now,
+      worker_code_1: worker_code_1,
+      worker_code_2: worker_code_2,
     };
 
     queries.insertBag(bag);

@@ -189,6 +189,8 @@ export class SyncEngine {
           offer_id: bag.offer_id,
           batch_no: bag.batch_no,
           note: bag.note,
+          worker_code_1: bag.worker_code_1,
+          worker_code_2: bag.worker_code_2,
         });
 
         this.queries.updateBagSynced(bag.bag_id, resp.line_id);
@@ -224,14 +226,13 @@ export class SyncEngine {
    * Next sync cycle will register the new session and push the moved bags.
    */
   async handleSessionRollover(closedSession: FGSession, today: string): Promise<void> {
-    // Mark old session as closed by dispatch
-    this.queries.markSessionClosedExternally(closedSession.session_id);
-
     // Check for unsynced bags to move
     const unsyncedBags = this.queries.getBagsBySession(closedSession.session_id)
       .filter((b: FGBag) => b.synced === 0);
 
     if (unsyncedBags.length === 0) {
+      // No bags to move — just mark old session closed
+      this.queries.markSessionClosedExternally(closedSession.session_id);
       logger.info(
         { sessionId: closedSession.session_id },
         'Session closed externally, no unsynced bags to move',
@@ -268,10 +269,8 @@ export class SyncEngine {
       last_sync_at: null,
     };
 
-    this.queries.insertSession(newSession);
-
-    // Move unsynced bags to new session
-    const moved = this.queries.moveBagsToSession(closedSession.session_id, sessionId);
+    // Atomically: close old session + insert new session + move unsynced bags
+    const moved = this.queries.rolloverSession(closedSession.session_id, newSession);
 
     logger.info(
       {
@@ -323,6 +322,8 @@ export class SyncEngine {
         qr_code: b.qr_code,
         batch_no: b.batch_no,
         note: b.note,
+        worker_code_1: b.worker_code_1,
+        worker_code_2: b.worker_code_2,
       })),
     });
 
@@ -451,24 +452,42 @@ export class SyncEngine {
       return { products: 0, items: 0 };
     }
 
-    try {
-      logger.info('Pulling master data from Django');
+    logger.info('Pulling master data from Django');
 
-      const [configs, items] = await Promise.all([
-        this.client.fetchPackConfigs(),
-        this.client.fetchItemMasters(),
-      ]);
+    const [configsResult, itemsResult, workersResult] = await Promise.allSettled([
+      this.client.fetchPackConfigs(),
+      this.client.fetchItemMasters(),
+      this.client.fetchWorkerMasters(),
+    ]);
 
-      this.queries.replacePackConfigs(configs);
-      this.queries.replaceItemMasters(items);
-      this.queries.setMeta('last_master_sync_at', new Date().toISOString());
+    let products = 0;
+    let items = 0;
 
-      logger.info({ products: configs.length, items: items.length }, 'Master data updated');
-      return { products: configs.length, items: items.length };
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      logger.error({ error }, 'Master data pull failed');
-      return { products: 0, items: 0 };
+    if (configsResult.status === 'fulfilled') {
+      this.queries.replacePackConfigs(configsResult.value);
+      products = configsResult.value.length;
+    } else {
+      logger.error({ error: configsResult.reason?.message || String(configsResult.reason) }, 'Failed to fetch pack configs');
     }
+
+    if (itemsResult.status === 'fulfilled') {
+      this.queries.replaceItemMasters(itemsResult.value);
+      items = itemsResult.value.length;
+    } else {
+      logger.error({ error: itemsResult.reason?.message || String(itemsResult.reason) }, 'Failed to fetch item masters');
+    }
+
+    if (workersResult.status === 'fulfilled') {
+      this.queries.replaceWorkerMasters(workersResult.value);
+    } else {
+      logger.error({ error: workersResult.reason?.message || String(workersResult.reason) }, 'Failed to fetch worker masters');
+    }
+
+    if (configsResult.status === 'fulfilled' || itemsResult.status === 'fulfilled' || workersResult.status === 'fulfilled') {
+      this.queries.setMeta('last_master_sync_at', new Date().toISOString());
+    }
+
+    logger.info({ products, items }, 'Master data pull complete');
+    return { products, items };
   }
 }
