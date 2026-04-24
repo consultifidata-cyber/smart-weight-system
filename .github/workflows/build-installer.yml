@@ -75,7 +75,8 @@ jobs:
           Invoke-WebRequest $url -OutFile $out
 
           Expand-Archive $out -DestinationPath "installer\assets\"
-          Rename-Item "installer\assets\node-v${ver}-win-x64" "installer\assets\node-runtime"
+          # Move-Item handles full destination paths; Rename-Item only takes a new name (not a path)
+          Move-Item "installer\assets\node-v${ver}-win-x64" "installer\assets\node-runtime"
 
           # Verify: node.exe must exist
           $nodeExe = "installer\assets\node-runtime\node.exe"
