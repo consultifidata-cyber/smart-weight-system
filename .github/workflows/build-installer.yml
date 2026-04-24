@@ -24,6 +24,8 @@ jobs:
   build-installer:
     name: Build SmartWeightSetup.exe
     runs-on: windows-latest   # Windows Server 2022 — has VS Build Tools pre-installed
+    permissions:
+      contents: write   # required to upload artifacts and create GitHub Releases
 
     steps:
       # ── 1. Source ────────────────────────────────────────────────────────────
