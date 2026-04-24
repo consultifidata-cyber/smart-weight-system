@@ -123,16 +123,19 @@ jobs:
         shell: pwsh
 
       # ── 8. Locate / install Inno Setup 6 ─────────────────────────────────────
-      # windows-latest already ships with Inno Setup 6.x — no pinned version.
-      # choco exits 0 when the package is already up-to-date.
+      # windows-latest ships with Inno Setup 6.x pre-installed.
+      # Check specific known paths — no recursive scan.
       - name: Ensure Inno Setup 6 is available
         run: |
-          $iscc = Get-ChildItem 'C:\Program Files*' -Recurse -Filter 'ISCC.exe' -ErrorAction SilentlyContinue |
-                  Select-Object -First 1 -ExpandProperty FullName
+          $candidates = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if ($iscc) {
-            Write-Host "Inno Setup already installed: $iscc"
+            Write-Host "Inno Setup found: $iscc"
           } else {
-            Write-Host "Installing Inno Setup via Chocolatey..."
+            Write-Host "Not found in standard paths — installing via Chocolatey..."
             choco install innosetup --yes --no-progress
           }
         shell: pwsh
@@ -140,10 +143,13 @@ jobs:
       # ── 9. Compile installer ──────────────────────────────────────────────────
       - name: Compile SmartWeightSetup.exe
         run: |
-          # Find ISCC.exe under any 'Inno Setup*' folder (handles 6.3, 6.7, etc.)
-          $iscc = Get-ChildItem 'C:\Program Files*' -Recurse -Filter 'ISCC.exe' -ErrorAction SilentlyContinue |
-                  Select-Object -First 1 -ExpandProperty FullName
-          if (-not $iscc) { throw 'ISCC.exe not found — Inno Setup installation may have failed' }
+          $candidates = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'ISCC.exe not found in standard paths — check Inno Setup installation' }
+          Write-Host "Using ISCC: $iscc"
 
           & $iscc `
             /DAppVersion="${{ steps.version.outputs.appver }}" `
