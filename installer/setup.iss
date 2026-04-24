@@ -481,8 +481,12 @@ begin
     'Get these from your system administrator.',
     ''
   );
-  PageServer.Add('Django Server URL:', False, 'http://192.168.1.100:8000');
-  PageServer.Add('API Token (from WeighStation admin):', True, '');
+  // TInputQueryWizardPage.Add(prompt, isPassword) — 2 params only in Inno Setup 6
+  // Default values set via Values[i] after Add() calls complete.
+  PageServer.Add('Django Server URL:', False);
+  PageServer.Add('API Token (from WeighStation admin):', True);
+  PageServer.Values[0] := 'http://192.168.1.100:8000';
+  PageServer.Values[1] := '';
 
   // ── Page 3: Station Configuration ────────────────────────────────────────
   PageStation := CreateInputQueryPage(
@@ -492,8 +496,10 @@ begin
     'Station ID must be unique within the plant.',
     ''
   );
-  PageStation.Add('Plant ID:', False, 'A1');
-  PageStation.Add('Station ID:', False, 'ST01');
+  PageStation.Add('Plant ID:', False);
+  PageStation.Add('Station ID:', False);
+  PageStation.Values[0] := 'A1';
+  PageStation.Values[1] := 'ST01';
 
   // Run detection (happens after pages are created, before first page shown)
   RunHardwareDetection;
