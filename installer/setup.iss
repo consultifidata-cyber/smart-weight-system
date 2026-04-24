@@ -620,20 +620,18 @@ var
   FinishText: String;
 begin
   if CurPageID = wpFinished then begin
+    // #13#10 must never start a line — ISPP preprocessor misreads it as a directive.
+    // Keep all #13#10 sequences at the END of their line.
     FinishText :=
-      'Smart Weight System has been installed.' + #13#10 +
-      #13#10 +
+      'Smart Weight System has been installed.' + #13#10 + #13#10 +
       'Open the web dashboard:' + #13#10 +
-      '  http://localhost:3000' + #13#10 +
-      #13#10 +
+      '  http://localhost:3000' + #13#10 + #13#10 +
       'Check that all services are running:' + #13#10 +
-      '  http://localhost:5099/health' + #13#10 +
-      #13#10 +
+      '  http://localhost:5099/health' + #13#10 + #13#10 +
       'If something is not working:' + #13#10 +
       '  1. Check logs:  C:\SmartWeightSystem\logs\launcher.log' + #13#10 +
       '  2. Run health report (creates zip on Desktop for support):' + #13#10 +
-      '     powershell -File "C:\SmartWeightSystem\tools\health-report.ps1"' + #13#10 +
-      #13#10 +
+      '     powershell -File "C:\SmartWeightSystem\tools\health-report.ps1"' + #13#10 + #13#10 +
       'To restart the system:' + #13#10 +
       '  net stop SmartWeightSystem  &&  net start SmartWeightSystem';
 
