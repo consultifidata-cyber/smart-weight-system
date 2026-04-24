@@ -38,6 +38,12 @@ export class SyncEngine {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   start(): void {
+    // Startup recovery: reset any sessions stuck in SYNCING from a previous crash
+    const resetCount = this.queries.resetStuckSyncingSessions();
+    if (resetCount > 0) {
+      logger.warn({ resetCount }, 'Reset stuck SYNCING sessions to PENDING on startup');
+    }
+
     logger.info(
       {
         retryIntervalMs: this.retryIntervalMs,

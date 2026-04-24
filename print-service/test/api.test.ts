@@ -7,16 +7,21 @@ import type { PrinterDriver, PrinterConfig } from '../src/types.js';
 interface MockDriverOptions {
   healthy?: boolean;
   sendError?: string;
+  resetError?: string;
 }
 
 class MockDriver implements PrinterDriver {
   private healthy: boolean;
   private sendError?: string;
+  private resetError?: string;
   public lastBuiltLabel?: Buffer;
+  public resetCalled = false;
+  public lastSendTimeoutMs?: number;
 
   constructor(options: MockDriverOptions = {}) {
     this.healthy = options.healthy !== false;
     this.sendError = options.sendError;
+    this.resetError = options.resetError;
   }
 
   buildLabel(data: Parameters<PrinterDriver['buildLabel']>[0]): Buffer {
@@ -24,25 +29,28 @@ class MockDriver implements PrinterDriver {
     return Buffer.from('MOCK_TSPL');
   }
 
-  async send(commands: Buffer): Promise<void> {
-    if (this.sendError) {
-      throw new Error(this.sendError);
-    }
+  buildLabelLinux(data: Parameters<PrinterDriver['buildLabel']>[0]): Buffer { return this.buildLabel(data); }
+  buildLabelWin(data: Parameters<PrinterDriver['buildLabel']>[0]): Buffer { return this.buildLabel(data); }
+
+  async send(_commands: Buffer, timeoutMs?: number): Promise<void> {
+    this.lastSendTimeoutMs = timeoutMs;
+    if (this.sendError) throw new Error(this.sendError);
   }
 
-  async sendWin(commands: Buffer): Promise<void> {
-    if (this.sendError) {
-      throw new Error(this.sendError);
-    }
+  async sendLinux(_commands: Buffer, _timeoutMs?: number): Promise<void> { return this.send(_commands, _timeoutMs); }
+  async sendWin(_commands: Buffer, _timeoutMs?: number): Promise<void> { return this.send(_commands, _timeoutMs); }
+
+  async healthCheck(_timeoutMs?: number): Promise<boolean> { return this.healthy; }
+  async healthCheckLinux(_timeoutMs?: number): Promise<boolean> { return this.healthy; }
+  async healthCheckWin(_timeoutMs?: number): Promise<boolean> { return this.healthy; }
+
+  async resetPrinter(): Promise<void> {
+    this.resetCalled = true;
+    if (this.resetError) throw new Error(this.resetError);
   }
 
-  async healthCheck(): Promise<boolean> {
-    return this.healthy;
-  }
-
-  async healthCheckWin(): Promise<boolean> {
-    return this.healthy;
-  }
+  async resetPrinterLinux(): Promise<void> { return this.resetPrinter(); }
+  async resetPrinterWin(): Promise<void> { return this.resetPrinter(); }
 }
 
 const mockConfig: PrinterConfig = {
@@ -55,6 +63,8 @@ const mockConfig: PrinterConfig = {
   stationId: 'ST01',
   apiPort: 5001,
   logLevel: 'info',
+  sendTimeoutMs: 1000,
+  healthPollMs: 30000,
 };
 
 describe('Print API', () => {
@@ -217,5 +227,131 @@ describe('Print API', () => {
 
     assert.equal(res.status, 200);
     assert.equal(res.body.service, 'print-service');
+  });
+
+  it('POST /print/reset returns 200 on success', async () => {
+    const driver = new MockDriver({ healthy: true });
+    const app = createServer(driver, mockConfig);
+
+    const res = await request(app).post('/print/reset');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'ok');
+    assert.equal(res.body.connected, true);
+    assert.equal(driver.resetCalled, true);
+  });
+
+  it('POST /print/reset returns 503 on failure', async () => {
+    const driver = new MockDriver({ resetError: 'Spooler failed' });
+    const app = createServer(driver, mockConfig);
+
+    const res = await request(app).post('/print/reset');
+
+    assert.equal(res.status, 503);
+    assert.equal(res.body.status, 'error');
+    assert.match(res.body.error, /spooler/i);
+  });
+
+  it('POST /print/reset returns connected=false when printer still offline after reset', async () => {
+    const driver = new MockDriver({ healthy: false });
+    const app = createServer(driver, mockConfig);
+
+    const res = await request(app).post('/print/reset');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'error');
+    assert.equal(res.body.connected, false);
+    assert.equal(driver.resetCalled, true);
+  });
+
+  it('POST /print/print rejects zero weight', async () => {
+    const driver = new MockDriver();
+    const app = createServer(driver, mockConfig);
+
+    const res = await request(app)
+      .post('/print/print')
+      .send({
+        product: 'FG-Zero-Weight',
+        weight: 0,
+        stationId: 'ST01',
+        line1: 'ZERO-150426-01-001',
+        line2: 'FG-Zero-Weight | 0.00 kg',
+      });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.status, 'error');
+    assert.match(res.body.error, /required fields/i);
+  });
+
+  it('POST /print/print rejects negative weight', async () => {
+    const driver = new MockDriver();
+    const app = createServer(driver, mockConfig);
+
+    const res = await request(app)
+      .post('/print/print')
+      .send({
+        product: 'FG-Neg-Weight',
+        weight: -5.0,
+        stationId: 'ST01',
+        line1: 'NEG-150426-01-001',
+        line2: 'FG-Neg-Weight | -5.00 kg',
+      });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.status, 'error');
+  });
+
+  it('POST /print/print rejects NaN weight', async () => {
+    const driver = new MockDriver();
+    const app = createServer(driver, mockConfig);
+
+    const res = await request(app)
+      .post('/print/print')
+      .send({
+        product: 'FG-NaN-Weight',
+        weight: 'not-a-number',
+        stationId: 'ST01',
+        line1: 'NAN-150426-01-001',
+        line2: 'FG-NaN-Weight',
+      });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.status, 'error');
+  });
+
+  it('POST /print/print rejects Infinity weight', async () => {
+    const driver = new MockDriver();
+    const app = createServer(driver, mockConfig);
+
+    const res = await request(app)
+      .post('/print/print')
+      .send({
+        product: 'FG-Inf-Weight',
+        weight: Infinity,
+        stationId: 'ST01',
+        line1: 'INF-150426-01-001',
+        line2: 'FG-Inf-Weight',
+      });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.status, 'error');
+  });
+
+  it('POST /print/print passes sendTimeoutMs from config to driver.send()', async () => {
+    const driver = new MockDriver();
+    const customConfig = { ...mockConfig, sendTimeoutMs: 2500 };
+    const app = createServer(driver, customConfig);
+
+    await request(app)
+      .post('/print/print')
+      .send({
+        product: 'FG-Timeout-Test',
+        weight: 10.0,
+        stationId: 'ST01',
+        line1: 'TMO-150426-01-001',
+        line2: 'FG-Timeout-Test | 10.00 kg',
+      });
+
+    assert.equal(driver.lastSendTimeoutMs, 2500);
   });
 });

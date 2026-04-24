@@ -66,8 +66,8 @@ router.post('/print', async (req: Request, res: Response) => {
     // Build TSPL commands
     const commands = driver.buildLabel(labelData);
 
-    // Send to printer
-    await driver.sendWin(commands);
+    // Send to printer (with timeout — single attempt, client owns retry)
+    await driver.send(commands, config.sendTimeoutMs);
 
     // Record this print request
     recentPrints.set(requestKey, Date.now());
@@ -105,7 +105,7 @@ router.get('/health', async (req: Request, res: Response) => {
   const { driver, config } = req.ctx as { driver: PrinterDriver; config: any };
 
   try {
-    const connected = await driver.healthCheckWin();
+    const connected = await driver.healthCheck();
 
     const response: HealthResponse = {
       printer: {
@@ -136,6 +136,22 @@ router.get('/health', async (req: Request, res: Response) => {
     };
 
     res.status(503).json(response);
+  }
+});
+
+router.post('/reset', async (req: Request, res: Response) => {
+  const { driver } = req.ctx as { driver: PrinterDriver; config: any };
+
+  try {
+    logger.info('Printer reset requested');
+    await driver.resetPrinter();
+    const connected = await driver.healthCheck();
+    logger.info({ connected }, 'Printer reset complete');
+    res.json({ status: connected ? 'ok' : 'error', connected });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error({ error }, 'Printer reset failed');
+    res.status(503).json({ status: 'error', error });
   }
 });
 

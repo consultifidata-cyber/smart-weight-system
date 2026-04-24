@@ -33,33 +33,27 @@ export interface HealthResponse {
   service: string;
   stationId: string;
   status: "ok" | "error";
+  lastCheckedAt?: string;
 }
 
 export interface PrinterDriver {
-  /**
-   * Build raw command bytes for a QR label.
-   */
+  // ── Generic (auto-detect platform via process.platform) ──
   buildLabel(data: LabelData): Buffer;
+  send(commands: Buffer, timeoutMs?: number): Promise<void>;
+  healthCheck(timeoutMs?: number): Promise<boolean>;
+  resetPrinter(): Promise<void>;
 
-  /**
-   * Send raw bytes to the physical printer (Linux: device file).
-   */
-  send(commands: Buffer): Promise<void>;
+  // ── Linux-specific ──
+  buildLabelLinux(data: LabelData): Buffer;
+  sendLinux(commands: Buffer, timeoutMs?: number): Promise<void>;
+  healthCheckLinux(timeoutMs?: number): Promise<boolean>;
+  resetPrinterLinux(): Promise<void>;
 
-  /**
-   * Send raw bytes to the physical printer (Windows: shared printer via copy /b).
-   */
-  sendWin(commands: Buffer): Promise<void>;
-
-  /**
-   * Check if printer is reachable / connected (Linux: fs.access on device file).
-   */
-  healthCheck(): Promise<boolean>;
-
-  /**
-   * Check if printer is reachable / connected (Windows: Get-Printer PowerShell query).
-   */
-  healthCheckWin(): Promise<boolean>;
+  // ── Windows-specific ──
+  buildLabelWin(data: LabelData): Buffer;
+  sendWin(commands: Buffer, timeoutMs?: number): Promise<void>;
+  healthCheckWin(timeoutMs?: number): Promise<boolean>;
+  resetPrinterWin(): Promise<void>;
 }
 
 export interface PrinterConfig {
@@ -72,4 +66,6 @@ export interface PrinterConfig {
   stationId: string;
   apiPort: number;
   logLevel: string;
+  sendTimeoutMs: number;
+  healthPollMs: number;
 }

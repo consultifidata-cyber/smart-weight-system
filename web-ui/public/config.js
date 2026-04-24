@@ -9,6 +9,10 @@ var CONFIG = {
   autoResetMs: 2000,
   fetchTimeoutMs: 3000,
   plantCode: 'BNJRS10',
+  printFetchTimeoutMs: 1500,
+  printRetryAttempts: 3,
+  printRetryDelayMs: 500,
+  printResetTimeoutMs: 20000,
 };
 
 
@@ -23,4 +27,8 @@ var CONFIG = {
 //   autoResetMs: 2000,
 //   fetchTimeoutMs: 3000,
 //   plantCode: 'BNJRS10',
+//   printFetchTimeoutMs: 1500,
+//   printRetryAttempts: 3,
+//   printRetryDelayMs: 500,
+//   printResetTimeoutMs: 20000,
 // };

@@ -34,6 +34,7 @@ function formatDateDDMMYY(date) {
 /**
  * Manages daily counters for line1 (global) and line2 (per-product).
  * All counters reset when the date changes.
+ * State is persisted to localStorage to survive page refreshes mid-shift.
  */
 function CounterManager() {
   this._dateStr = formatDateDDMMYY(new Date());
@@ -41,6 +42,9 @@ function CounterManager() {
   this._productIndexMap = {};     // productName → index (00, 01, ...)
   this._nextProductIndex = 0;
   this._productCountMap = {};     // productName → count (1, 2, 3, ...)
+
+  // Restore persisted state (if same date)
+  this._restore();
 }
 
 /**
@@ -49,6 +53,8 @@ function CounterManager() {
 CounterManager.prototype._checkDayReset = function () {
   var today = formatDateDDMMYY(new Date());
   if (today !== this._dateStr) {
+    // Clean up previous day's localStorage entry
+    try { localStorage.removeItem(this._storageKey()); } catch (e) { /* ignore */ }
     this._dateStr = today;
     this._globalCount = 0;
     this._productIndexMap = {};
@@ -64,6 +70,7 @@ CounterManager.prototype._checkDayReset = function () {
 CounterManager.prototype.nextLine1 = function () {
   this._checkDayReset();
   this._globalCount++;
+  this._persist();
   return String(this._globalCount).padStart(6, '0');
 };
 
@@ -86,11 +93,52 @@ CounterManager.prototype.nextLine2 = function (productName) {
 
   // Increment product count
   this._productCountMap[productName]++;
+  this._persist();
 
   var idx = String(this._productIndexMap[productName]).padStart(2, '0');
   var cnt = String(this._productCountMap[productName]).padStart(4, '0');
 
   return code + '-' + this._dateStr + '-' + idx + '-' + cnt;
+};
+
+/**
+ * localStorage key for persisting counter state.
+ */
+CounterManager.prototype._storageKey = function () {
+  var stationId = (typeof CONFIG !== 'undefined' && CONFIG.stationId) ? CONFIG.stationId : 'DEFAULT';
+  return 'counter_state_' + stationId + '_' + this._dateStr;
+};
+
+/**
+ * Persist current counter state to localStorage.
+ */
+CounterManager.prototype._persist = function () {
+  try {
+    var state = {
+      dateStr: this._dateStr,
+      globalCount: this._globalCount,
+      productIndexMap: this._productIndexMap,
+      nextProductIndex: this._nextProductIndex,
+      productCountMap: this._productCountMap,
+    };
+    localStorage.setItem(this._storageKey(), JSON.stringify(state));
+  } catch (e) { /* localStorage unavailable or full — continue without persistence */ }
+};
+
+/**
+ * Restore counter state from localStorage if date matches.
+ */
+CounterManager.prototype._restore = function () {
+  try {
+    var raw = localStorage.getItem(this._storageKey());
+    if (!raw) return;
+    var state = JSON.parse(raw);
+    if (state.dateStr !== this._dateStr) return;
+    this._globalCount = state.globalCount || 0;
+    this._productIndexMap = state.productIndexMap || {};
+    this._nextProductIndex = state.nextProductIndex || 0;
+    this._productCountMap = state.productCountMap || {};
+  } catch (e) { /* corrupted data — start fresh */ }
 };
 
 /**

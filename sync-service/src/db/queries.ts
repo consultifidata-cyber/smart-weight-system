@@ -41,6 +41,8 @@ export class Queries {
   private _updateSessionSynced!: Database.Statement;
   private _updateSessionClosed!: Database.Statement;
   private _listPendingSessions!: Database.Statement;
+  private _requeueFailedSessions!: Database.Statement;
+  private _resetStuckSyncingSessions!: Database.Statement;
   private _countSessionsByStatus!: Database.Statement;
   private _countClosedSessionsToday!: Database.Statement;
 
@@ -193,6 +195,18 @@ export class Queries {
       WHERE sync_status = 'PENDING'
       ORDER BY created_at ASC
       LIMIT ?
+    `);
+
+    this._requeueFailedSessions = this.db.prepare(`
+      UPDATE fg_session
+      SET sync_status = 'PENDING', sync_attempts = 0, sync_error = NULL, last_sync_at = NULL
+      WHERE sync_status = 'FAILED'
+    `);
+
+    this._resetStuckSyncingSessions = this.db.prepare(`
+      UPDATE fg_session
+      SET sync_status = 'PENDING', sync_error = 'Reset from SYNCING on startup'
+      WHERE sync_status = 'SYNCING'
     `);
 
     this._countSessionsByStatus = this.db.prepare(
@@ -431,6 +445,18 @@ export class Queries {
 
   listPendingSessions(limit: number = 20): FGSession[] {
     return this._listPendingSessions.all(limit) as FGSession[];
+  }
+
+  /** Reset all FAILED sessions back to PENDING for retry. Returns count of requeued sessions. */
+  requeueFailedSessions(): number {
+    const result = this._requeueFailedSessions.run();
+    return result.changes;
+  }
+
+  /** Reset any SYNCING sessions to PENDING (startup recovery after crash). Returns count reset. */
+  resetStuckSyncingSessions(): number {
+    const result = this._resetStuckSyncingSessions.run();
+    return result.changes;
   }
 
   countClosedSessionsToday(date: string): number {

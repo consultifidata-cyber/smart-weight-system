@@ -16,6 +16,8 @@ const config: PrinterConfig = Object.freeze({
   stationId: process.env.STATION_ID || 'ST01',
   apiPort: parseInt(process.env.PRINT_API_PORT || '5001', 10),
   logLevel: process.env.LOG_LEVEL || 'info',
+  sendTimeoutMs: parseInt(process.env.PRINT_SEND_TIMEOUT_MS || '1000', 10),
+  healthPollMs: parseInt(process.env.PRINT_HEALTH_POLL_MS || '30000', 10),
 });
 
 export default config;

@@ -11,8 +11,11 @@ const execAsync = promisify(exec);
  * Base TSPL driver implementation.
  * TSPL is used by TVS LP NEO 46 and TSC printers.
  *
- * Linux methods: send(), healthCheck()       — use device file path (e.g. /dev/usb/lp0)
- * Windows methods: sendWin(), healthCheckWin() — use shared printer name (e.g. TVSLP46NEO)
+ * Generic methods auto-detect the OS via process.platform and dispatch
+ * to the appropriate platform-specific method.
+ *
+ * Linux methods: sendLinux(), healthCheckLinux()   — use device file path (e.g. /dev/usb/lp0)
+ * Windows methods: sendWin(), healthCheckWin()     — use shared printer name (e.g. TVSLP46NEO)
  */
 export class TSPLDriver implements PrinterDriver {
   private device: string;
@@ -29,8 +32,10 @@ export class TSPLDriver implements PrinterDriver {
     this.dpi = dpi;
   }
 
+  // ── Shared label-building core ──────────────────────────────────────────
+
   /**
-   * Build TSPL command buffer for a QR label using BITMAP command.
+   * Core TSPL command buffer generation for a QR label using BITMAP command.
    *
    * The QR image is generated in Node.js (using the `qrcode` npm library)
    * instead of the printer's built-in QRCODE command. This matches the
@@ -47,7 +52,7 @@ export class TSPLDriver implements PrinterDriver {
    *   error_correction = ERROR_CORRECT_Q
    *   border = 2
    */
-  buildLabel(data: LabelData): Buffer {
+  private _buildLabelCore(data: LabelData): Buffer {
     const { qrContent, textLines } = data;
     const width = data.labelWidth || this.labelWidth;
     const height = data.labelHeight || this.labelHeight;
@@ -115,14 +120,33 @@ export class TSPLDriver implements PrinterDriver {
     return Buffer.concat([setupBuf, bmpHeaderBuf, bmpData, textBuf]);
   }
 
+  // ── Platform-specific: buildLabel ───────────────────────────────────────
+
+  buildLabelLinux(data: LabelData): Buffer {
+    return this._buildLabelCore(data);
+  }
+
+  buildLabelWin(data: LabelData): Buffer {
+    return this._buildLabelCore(data);
+  }
+
+  /** Generic dispatcher — auto-detects platform. */
+  buildLabel(data: LabelData): Buffer {
+    return process.platform === 'linux'
+      ? this.buildLabelLinux(data)
+      : this.buildLabelWin(data);
+  }
+
+  // ── Platform-specific: send ─────────────────────────────────────────────
+
   /**
-   * Send TSPL commands to the printer device.
+   * Send TSPL commands to the printer device (Linux).
    * Supports raw device files: /dev/lp0, /dev/usb/lp0, /dev/bus/usb/001/082, etc.
    */
-  async send(commands: Buffer): Promise<void> {
+  async sendLinux(commands: Buffer, timeoutMs: number = 1000): Promise<void> {
     const fs = await import('fs').then(m => m.promises);
     try {
-      await fs.writeFile(this.device, commands);
+      await fs.writeFile(this.device, commands, { signal: AbortSignal.timeout(timeoutMs) });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       throw new Error(`Failed to send print commands to ${this.device}: ${error}`);
@@ -130,9 +154,38 @@ export class TSPLDriver implements PrinterDriver {
   }
 
   /**
-   * Health check: verify device is accessible (Linux)
+   * Send TSPL commands to a Windows shared printer via copy /b.
+   * Writes commands to a temp file, then copies to \\localhost\<shareName>.
    */
-  async healthCheck(): Promise<boolean> {
+  async sendWin(commands: Buffer, timeoutMs: number = 1000): Promise<void> {
+    const fs = await import('fs').then(m => m.promises);
+    const tempFile = join(tmpdir(), `tspl_${Date.now()}.bin`);
+    try {
+      await fs.writeFile(tempFile, commands);
+      const uncPath = `\\\\localhost\\${this.device}`;
+      await execAsync(`copy /b "${tempFile}" "${uncPath}"`, { timeout: timeoutMs });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to send print commands to \\\\localhost\\${this.device}: ${error}`);
+    } finally {
+      const fs2 = await import('fs').then(m => m.promises);
+      await fs2.unlink(tempFile).catch(() => {});
+    }
+  }
+
+  /** Generic dispatcher — auto-detects platform. */
+  async send(commands: Buffer, timeoutMs?: number): Promise<void> {
+    return process.platform === 'linux'
+      ? this.sendLinux(commands, timeoutMs)
+      : this.sendWin(commands, timeoutMs);
+  }
+
+  // ── Platform-specific: healthCheck ──────────────────────────────────────
+
+  /**
+   * Health check: verify device is accessible (Linux — fs.access on device file).
+   */
+  async healthCheckLinux(_timeoutMs?: number): Promise<boolean> {
     const fs = await import('fs').then(m => m.promises);
     try {
       await fs.access(this.device);
@@ -143,38 +196,83 @@ export class TSPLDriver implements PrinterDriver {
   }
 
   /**
-   * Send TSPL commands to a Windows shared printer via copy /b.
-   * Writes commands to a temp file, then copies to \\localhost\<shareName>.
-   */
-  async sendWin(commands: Buffer): Promise<void> {
-    const fs = await import('fs').then(m => m.promises);
-    const tempFile = join(tmpdir(), `tspl_${Date.now()}.bin`);
-    try {
-      await fs.writeFile(tempFile, commands);
-      const uncPath = `\\\\localhost\\${this.device}`;
-      await execAsync(`copy /b "${tempFile}" "${uncPath}"`);
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to send print commands to \\\\localhost\\${this.device}: ${error}`);
-    } finally {
-      // Clean up temp file
-      const fs2 = await import('fs').then(m => m.promises);
-      await fs2.unlink(tempFile).catch(() => {});
-    }
-  }
-
-  /**
    * Health check for Windows: query printer status via PowerShell Get-Printer.
    * Uses the full Windows printer name (e.g. "SNBC TVSE LP 46 NEO BPLE").
    */
-  async healthCheckWin(): Promise<boolean> {
+  async healthCheckWin(timeoutMs: number = 3000): Promise<boolean> {
     try {
       const { stdout } = await execAsync(
         `powershell -Command "(Get-Printer -Name '${this.printerName}').PrinterStatus"`,
+        { timeout: timeoutMs },
       );
       return stdout.trim() === 'Normal';
     } catch {
       return false;
     }
+  }
+
+  /** Generic dispatcher — auto-detects platform. */
+  async healthCheck(timeoutMs?: number): Promise<boolean> {
+    return process.platform === 'linux'
+      ? this.healthCheckLinux(timeoutMs)
+      : this.healthCheckWin(timeoutMs);
+  }
+
+  // ── Platform-specific: resetPrinter ─────────────────────────────────────
+
+  /**
+   * Reset printer on Linux: unbind/rebind the USB device.
+   * Derives the USB bus ID from the configured device path.
+   */
+  async resetPrinterLinux(): Promise<void> {
+    try {
+      // Find USB device path from the device file (e.g. /dev/usb/lp0)
+      const { stdout } = await execAsync(
+        `udevadm info --query=path --name=${this.device} 2>/dev/null`,
+        { timeout: 3000 },
+      );
+      // Extract USB device ID (e.g. "1-2") from sysfs path
+      const match = stdout.match(/\/usb\d+\/([\d.-]+)\//);
+      if (match) {
+        const usbId = match[1];
+        await execAsync(`echo "${usbId}" > /sys/bus/usb/drivers/usb/unbind`, { timeout: 2000 }).catch(() => {});
+        await new Promise(r => setTimeout(r, 1000));
+        await execAsync(`echo "${usbId}" > /sys/bus/usb/drivers/usb/bind`, { timeout: 2000 }).catch(() => {});
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    } catch {
+      // Best-effort reset — if it fails, the caller will see the next healthCheck fail
+    }
+  }
+
+  /**
+   * Reset printer on Windows: restart the print spooler service and clear stuck jobs.
+   */
+  async resetPrinterWin(): Promise<void> {
+    // Stop spooler
+    await execAsync('net stop spooler', { timeout: 8000 }).catch(() => {});
+
+    // Clear stuck jobs from spool directory
+    const spoolDir = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\spool\\PRINTERS`;
+    try {
+      const fs = await import('fs').then(m => m.promises);
+      const files = await fs.readdir(spoolDir).catch(() => [] as string[]);
+      for (const f of files) {
+        await fs.unlink(join(spoolDir, f)).catch(() => {});
+      }
+    } catch { /* best effort */ }
+
+    // Restart spooler
+    await execAsync('net start spooler', { timeout: 8000 });
+
+    // Wait for printer to re-enumerate on the spooler
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
+  /** Generic dispatcher — auto-detects platform. */
+  async resetPrinter(): Promise<void> {
+    return process.platform === 'linux'
+      ? this.resetPrinterLinux()
+      : this.resetPrinterWin();
   }
 }

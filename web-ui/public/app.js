@@ -2,7 +2,7 @@
 
 function weightApp() {
   return {
-    // ── State: IDLE | PRINTING | PRINT_FAILED | PRINTED ──
+    // ── State: IDLE | PRINTING | PRINT_RETRYING | PRINT_FAILED | PRINTED ──
     state: 'IDLE',
 
     // ── Weight data ──
@@ -36,6 +36,11 @@ function weightApp() {
 
     // ── Counter (line1 on label) ──
     counter: null,
+
+    // ── Print retry state ──
+    printAttempt: 0,
+    printMaxAttempts: 0,
+    printResetting: false,
 
     // ── Timers ──
     _weightPollId: null,
@@ -218,7 +223,7 @@ function weightApp() {
         return;
       }
 
-      // Step 2: Send label to printer
+      // Step 2: Send label to printer (with retry)
       await this._printLabel(weightKg);
     },
 
@@ -230,46 +235,109 @@ function weightApp() {
       await this._printLabel(this.lastBag.weight_kg);
     },
 
+    /**
+     * Send label to printer with retry loop (3 attempts, 500ms fixed delay).
+     * On total failure, triggers background printer reset.
+     */
     async _printLabel(weightKg) {
+      var maxAttempts = CONFIG.printRetryAttempts || 3;
+      this.printMaxAttempts = maxAttempts;
+
+      var qrCode = this.lastBag.qr_code;
+      var packName = this.lastBag.pack_name || '';
+      var line1 = this.lastBag.line1 + ' | ' + weightKg.toFixed(2) + ' kg';
+      var printPayload = {
+        product: packName,
+        weight: weightKg,
+        stationId: CONFIG.stationId,
+        line1: line1,
+        line2: qrCode,
+        qrContent: qrCode,
+      };
+
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        this.printAttempt = attempt;
+
+        // Show retrying state from attempt 2 onward
+        if (attempt > 1) {
+          this.state = 'PRINT_RETRYING';
+          this.errorMessage = 'Print failed, retrying...';
+        }
+
+        try {
+          var printRes = await this._fetchWithTimeout(
+            CONFIG.printServiceUrl + '/print/print',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(printPayload),
+            },
+            CONFIG.printFetchTimeoutMs
+          );
+
+          var printData = await printRes.json();
+
+          if (printRes.ok && printData.status === 'ok') {
+            // Success
+            this.state = 'PRINTED';
+            this.errorMessage = null;
+            var self = this;
+            this._autoResetId = setTimeout(function () {
+              if (self.state === 'PRINTED') {
+                self.state = 'IDLE';
+              }
+            }, CONFIG.autoResetMs);
+            return;
+          }
+          // Server returned error (503 etc.) — continue to next attempt
+        } catch (err) {
+          // Network error or timeout — continue to next attempt
+        }
+
+        // Wait before next retry (but not after the last attempt)
+        if (attempt < maxAttempts) {
+          await new Promise(function (r) { setTimeout(r, CONFIG.printRetryDelayMs || 500); });
+        }
+      }
+
+      // All attempts exhausted — show failure + trigger background reset
+      this.state = 'PRINT_FAILED';
+      this.errorMessage = 'Print failed. Tap Retry Print.';
+      this._resetPrinterBackground();
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // Background printer reset (fire-and-forget after all retries fail)
+    // ══════════════════════════════════════════════════════════════
+
+    async _resetPrinterBackground() {
+      this.printResetting = true;
+      this.errorMessage = 'Resetting printer...';
+
       try {
-        var qrCode = this.lastBag.qr_code;
-        var packName = this.lastBag.pack_name || '';
-        var line1 = this.lastBag.line1 + ' | ' + weightKg.toFixed(2) + ' kg';
+        var res = await this._fetchWithTimeout(
+          CONFIG.printServiceUrl + '/print/reset',
+          { method: 'POST' },
+          CONFIG.printResetTimeoutMs || 20000
+        );
+        var data = await res.json();
 
-        var printRes = await this._fetchWithTimeout(CONFIG.printServiceUrl + '/print/print', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            product: packName,
-            weight: weightKg,
-            stationId: CONFIG.stationId,
-            line1: line1,
-            line2: qrCode,
-            qrContent: qrCode,
-          }),
-        });
-
-        var printData = await printRes.json();
-
-        if (printRes.ok && printData.status === 'ok') {
-          this.state = 'PRINTED';
-          var self = this;
-          this._autoResetId = setTimeout(function () {
-            if (self.state === 'PRINTED') {
-              self.state = 'IDLE';
-            }
-          }, CONFIG.autoResetMs);
+        if (data.connected) {
+          this.errorMessage = 'Printer reset. Tap Retry Print.';
         } else {
-          this.state = 'PRINT_FAILED';
-          this.errorMessage = 'Print failed: ' + (printData.error || 'Unknown error');
-          var self2 = this;
-          setTimeout(function () { self2.errorMessage = null; }, 8000);
+          this.errorMessage = 'Printer still offline. Check connection.';
         }
       } catch (err) {
-        this.state = 'PRINT_FAILED';
-        this.errorMessage = 'Cannot reach printer';
-        var self3 = this;
-        setTimeout(function () { self3.errorMessage = null; }, 8000);
+        this.errorMessage = 'Reset failed. Check printer.';
+      } finally {
+        this.printResetting = false;
+        var self = this;
+        setTimeout(function () {
+          // Only clear if still showing a reset-related message
+          if (self.state === 'PRINT_FAILED') {
+            self.errorMessage = null;
+          }
+        }, 10000);
       }
     },
 
@@ -279,48 +347,11 @@ function weightApp() {
 
     async reprintLast() {
       if (!this.lastBag) return;
-      if (this.state === 'PRINTING' || this.state === 'PRINTED') return;
+      if (this.state === 'PRINTING' || this.state === 'PRINTED' || this.state === 'PRINT_RETRYING') return;
 
-      var prevState = this.state;
       this.state = 'PRINTING';
       this.errorMessage = null;
-
-      try {
-        var printRes = await this._fetchWithTimeout(CONFIG.printServiceUrl + '/print/print', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            product: this.lastBag.pack_name || '',
-            weight: this.lastBag.weight_kg,
-            stationId: CONFIG.stationId,
-            line1: this.lastBag.line1,
-            line2: this.lastBag.qr_code,
-            qrContent: this.lastBag.qr_code,
-          }),
-        });
-
-        var data = await printRes.json();
-
-        if (printRes.ok && data.status === 'ok') {
-          this.state = 'PRINTED';
-          var self = this;
-          this._autoResetId = setTimeout(function () {
-            if (self.state === 'PRINTED') {
-              self.state = 'IDLE';
-            }
-          }, CONFIG.autoResetMs);
-        } else {
-          this.errorMessage = 'Reprint failed';
-          this.state = prevState;
-          var self2 = this;
-          setTimeout(function () { self2.errorMessage = null; }, 5000);
-        }
-      } catch (err) {
-        this.errorMessage = 'Cannot reach printer';
-        this.state = prevState;
-        var self3 = this;
-        setTimeout(function () { self3.errorMessage = null; }, 5000);
-      }
+      await this._printLabel(this.lastBag.weight_kg);
     },
 
     // ══════════════════════════════════════════════════════════════
@@ -372,6 +403,7 @@ function weightApp() {
 
     get printButtonText() {
       if (this.state === 'PRINTING') return 'Printing...';
+      if (this.state === 'PRINT_RETRYING') return 'Retrying... (' + this.printAttempt + '/' + this.printMaxAttempts + ')';
       if (this.state === 'PRINTED') return 'Printed!';
       if (this.state === 'PRINT_FAILED') return 'Retry Print';
       if (this.weightStatus !== 'ok') return 'Scale Disconnected';
@@ -381,7 +413,8 @@ function weightApp() {
     },
 
     get printButtonDisabled() {
-      if (this.state === 'PRINT_FAILED') return false; // allow retry
+      if (this.state === 'PRINT_FAILED') return false; // allow manual retry
+      if (this.state === 'PRINT_RETRYING') return true; // block during auto-retry
       return !this.canPrint;
     },
 
@@ -424,9 +457,10 @@ function weightApp() {
       }
     },
 
-    _fetchWithTimeout(url, options) {
+    _fetchWithTimeout(url, options, timeoutMs) {
+      var ms = timeoutMs || CONFIG.fetchTimeoutMs;
       var controller = new AbortController();
-      var timeoutId = setTimeout(function () { controller.abort(); }, CONFIG.fetchTimeoutMs);
+      var timeoutId = setTimeout(function () { controller.abort(); }, ms);
       var opts = Object.assign({}, options || {}, { signal: controller.signal });
       return fetch(url, opts).finally(function () { clearTimeout(timeoutId); });
     },

@@ -37,7 +37,15 @@
       "Bash(curl -s http://localhost:5002/entries/nonexistent)",
       "Bash(curl -s -X POST http://localhost:5002/entries -H \"Content-Type: application/json\" -d '{\"station_id\":\"ST01\",\"plant_id\":1,\"entry_date\":\"2026-04-14\",\"item_id\":42,\"pack_config_id\":7,\"num_bags\":10}')",
       "Bash(SIMULATE_SERIAL=true npx tsx weight-service/src/index.ts)",
-      "Bash(curl -s http://localhost:5000/weight)"
+      "Bash(curl -s http://localhost:5000/weight)",
+      "Bash(npm audit:*)",
+      "Bash(find /home/localhost/Desktop/consultifi-data/smart-weight-system/.claude -type f -name \"*.md\" 2>/dev/null | head -20)",
+      "Bash(find /home/localhost/Desktop/consultifi-data/smart-weight-system/weight-service -name \".env*\" -o -name \"tsconfig.json\" -o -name \".gitignore\" 2>/dev/null | head -20)",
+      "Bash(wc -l /home/localhost/Desktop/consultifi-data/smart-weight-system/print-service/src/**/*.ts)",
+      "Bash(ls -la /home/localhost/Desktop/consultifi-data/smart-weight-system/ | grep -E \"\\\\.\\(json|js|yml|yaml|sh\\)$\")",
+      "Bash(wc -l /home/localhost/Desktop/consultifi-data/smart-weight-system/sync-service/test/*.test.ts)",
+      "Bash(npm ls:*)",
+      "Bash(grep -r \"health\" /home/localhost/Desktop/consultifi-data/smart-weight-system/*/src/api --include=\"*.ts\" | head -20)"
     ]
   }
 }

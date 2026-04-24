@@ -15,7 +15,7 @@ export function createDriver(config: PrinterConfig): PrinterDriver {
       return new TSPLDriver(device, labelWidth, labelHeight, dpi, config.printerName);
 
     // Future: TSC driver, ESCPOS driver, CUPS driver, etc.
-    case 'TSC':
+    case 'tsc':
       throw new Error('TSC driver not yet implemented');
 
     default:

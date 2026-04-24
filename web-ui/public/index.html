@@ -49,7 +49,7 @@
           <button
             class="recent-btn"
             :class="{ active: String(selectedPackId) === String(p.pack_id) }"
-            :disabled="state === 'PRINTING' || state === 'PRINTED'"
+            :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'"
             @click="selectRecentProduct(p.pack_id)"
             x-text="p.name"
           ></button>
@@ -72,7 +72,7 @@
         <!-- Product Selector (always visible) -->
         <div class="select-wrapper">
           <select class="product-select" x-model="selectedPackId"
-            :disabled="state === 'PRINTING' || state === 'PRINTED'">
+            :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
             <option value="">-- Select Product --</option>
             <template x-for="p in products" :key="p.pack_id">
               <option
@@ -91,7 +91,7 @@
             <span class="last-bag-text" x-text="lastBagDisplay"></span>
           </div>
           <button class="reprint-btn"
-            :disabled="state === 'PRINTING' || state === 'PRINTED'"
+            :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'"
             @click="reprintLast()">Reprint</button>
         </div>
 
@@ -103,6 +103,7 @@
           class="print-btn"
           :class="{
             printing: state === 'PRINTING',
+            retrying: state === 'PRINT_RETRYING',
             success: state === 'PRINTED',
             error: state === 'PRINT_FAILED'
           }"

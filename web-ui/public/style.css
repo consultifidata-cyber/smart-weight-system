@@ -335,8 +335,18 @@ html, body {
   background: var(--color-success);
 }
 
+.print-btn.retrying {
+  background: var(--color-settling);
+  animation: pulse-retry 1.5s ease-in-out infinite;
+}
+
 .print-btn.error {
   background: var(--color-error);
+}
+
+@keyframes pulse-retry {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 

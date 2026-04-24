@@ -99,6 +99,27 @@ router.post('/push-pending', async (req: Request, res: Response) => {
   }
 });
 
+// POST /sync/requeue-failed — Reset all FAILED sessions back to PENDING for retry
+router.post('/requeue-failed', (req: Request, res: Response) => {
+  const { queries } = req.ctx;
+
+  try {
+    const requeued = queries.requeueFailedSessions();
+    logger.info({ requeued }, 'Requeued failed sessions');
+    res.json({
+      status: 'ok',
+      requeued,
+      message: requeued === 0
+        ? 'No failed sessions to requeue'
+        : `Requeued ${requeued} session(s) for retry`,
+    });
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error({ error }, 'Requeue failed sessions error');
+    res.status(500).json({ status: 'error', error });
+  }
+});
+
 // POST /sync/flush — End-of-shift: close all open sessions, push to Django
 router.post('/flush', async (req: Request, res: Response) => {
   const { syncEngine } = req.ctx;
