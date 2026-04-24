@@ -88,22 +88,25 @@ jobs:
           Write-Host "Portable runtime verified: $runtimeVer"
         shell: pwsh
 
-      # ── 6. Download and verify NSSM ───────────────────────────────────────────
-      - name: Download NSSM
+      # ── 6. Install NSSM and stage for installer bundle ───────────────────────
+      # nssm.cc is unreliable from CI — use Chocolatey (stable, cached on runner).
+      - name: Install and stage NSSM
         run: |
-          $nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
-          Invoke-WebRequest $nssmUrl -OutFile "nssm.zip"
+          choco install nssm --yes --no-progress
 
-          $hash = (Get-FileHash "nssm.zip" -Algorithm SHA256).Hash
-          Write-Host "NSSM zip SHA256: $hash"
-          # Update EXPECTED_HASH after first successful build and pin it here:
-          # if ($hash -ne 'EXPECTED_SHA256') { throw "NSSM hash mismatch" }
+          # Locate nssm.exe installed by choco
+          $nssmExe = (Get-Command nssm -ErrorAction SilentlyContinue).Source
+          if (-not $nssmExe) {
+            # Fallback: known choco install path
+            $nssmExe = 'C:\ProgramData\chocolatey\bin\nssm.exe'
+          }
+          if (-not (Test-Path $nssmExe)) { throw "nssm.exe not found after choco install" }
+          Write-Host "NSSM located: $nssmExe"
+          Write-Host "NSSM version: $(& $nssmExe version 2>&1 | Select-Object -First 1)"
 
-          Expand-Archive "nssm.zip" -DestinationPath "nssm-extracted\"
           New-Item -ItemType Directory -Force "installer\assets\tools" | Out-Null
-          Copy-Item "nssm-extracted\nssm-2.24\win64\nssm.exe" "installer\assets\tools\nssm.exe"
-
-          Write-Host "NSSM ready: installer\assets\tools\nssm.exe"
+          Copy-Item $nssmExe "installer\assets\tools\nssm.exe"
+          Write-Host "NSSM staged: installer\assets\tools\nssm.exe"
         shell: pwsh
 
       # ── 7. Resolve version string ─────────────────────────────────────────────
