@@ -28,19 +28,22 @@ async function main(): Promise<void> {
       logger.info({ port: config.apiPort }, 'Print service listening');
     });
 
-    // Background health polling — log state transitions (connected ↔ disconnected)
+    // Hardware heartbeat — every 10 s (PRINT_HEALTH_POLL_MS).
+    // CascadingPrintAdapter.healthCheck() drives automatic recovery internally:
+    // if the current adapter fails it probes USBPRIN → libusb → COM and switches.
     const healthPollId = setInterval(async () => {
       try {
         const nowConnected = await driver.healthCheck();
         if (nowConnected !== printerConnected) {
+          const adapterInfo = (driver as any).adapter?.getInfo?.() ?? 'n/a';
           if (nowConnected) {
-            logger.info('Printer reconnected');
+            logger.info({ adapter: adapterInfo }, 'Printer recovered');
           } else {
-            logger.warn('Printer disconnected');
+            logger.warn({ adapter: adapterInfo }, 'Printer unavailable — will retry next heartbeat');
           }
           printerConnected = nowConnected;
         }
-      } catch { /* healthCheck returns boolean, shouldn't throw */ }
+      } catch { /* healthCheck must not throw */ }
     }, config.healthPollMs);
 
     // Graceful shutdown: drain in-flight print requests before exit.

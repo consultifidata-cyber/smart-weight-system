@@ -467,3 +467,147 @@ export class UsbDirectAdapter implements PrintAdapter {
     this._device   = null;
   }
 }
+
+// ── Cascading Print Adapter — Self-Healing Layer ──────────────────────────────
+//
+// Wraps the three adapter layers into a single self-healing adapter:
+//   Layer 1: UsbPrintAdapter  (\\.\USBPRINxx — usbprint.sys, auto-installed)
+//   Layer 2: UsbDirectAdapter (node-usb/libusb — no-driver USB devices)
+//   Layer 3: SerialPrintAdapter (COM port — USB-CDC printers)
+//
+// Recovery behaviour:
+//   - healthCheck() re-probes the cascade automatically when current fails.
+//   - sendRaw() retries once on failure after switching to the next adapter.
+//   - Logs "Printer lost → re-detecting..." / "Recovered via <adapter>"
+//   - No restart required. Recovery completes within one heartbeat cycle.
+
+export class CascadingPrintAdapter implements PrintAdapter {
+  private _current:     PrintAdapter | null = null;
+  private _currentName  = 'none';
+  private _recovering   = false;
+
+  private readonly _usbDevice: string | undefined;
+  private readonly _comPort:   string | undefined;
+
+  constructor(opts: { usbDevice?: string; comPort?: string } = {}) {
+    this._usbDevice = opts.usbDevice;
+    this._comPort   = opts.comPort;
+  }
+
+  getInfo(): string {
+    return `CascadingPrintAdapter(active=${this._currentName}, recovering=${this._recovering})`;
+  }
+
+  /** Whether a recovery cycle is currently in progress. */
+  get recovering(): boolean { return this._recovering; }
+
+  // ── Internal cascade probe ────────────────────────────────────────────────
+
+  private async _probe(): Promise<{ adapter: PrintAdapter; name: string } | null> {
+    // Layer 1 — \\.\USBPRINxx
+    const usbAdapter = new UsbPrintAdapter(this._usbDevice);
+    if (await usbAdapter.healthCheck()) {
+      const path = (usbAdapter as any).resolvedPath as string | null;
+      return { adapter: usbAdapter, name: `USBPRIN:${path ?? 'auto'}` };
+    }
+
+    // Layer 2 — libusb direct
+    const directAdapter = new UsbDirectAdapter();
+    if (await directAdapter.healthCheck()) {
+      return { adapter: directAdapter, name: 'libusb' };
+    }
+
+    // Layer 3 — COM port (USB-CDC printers, e.g. TVS LP 46 NEO WCH variant)
+    if (this._comPort) {
+      const serialAdapter = new SerialPrintAdapter(this._comPort);
+      if (await serialAdapter.healthCheck()) {
+        return { adapter: serialAdapter, name: `COM:${this._comPort}` };
+      }
+    }
+
+    return null;
+  }
+
+  // ── Recovery ─────────────────────────────────────────────────────────────
+
+  private async _recover(reason: string): Promise<boolean> {
+    if (this._recovering) return false;   // guard: one recovery at a time
+    this._recovering = true;
+
+    logger.warn(
+      { reason, prev: this._currentName },
+      '[cascade] Printer lost — re-detecting…',
+    );
+
+    const found = await this._probe();
+    this._recovering = false;
+
+    if (found) {
+      this._current     = found.adapter;
+      this._currentName = found.name;
+      logger.info({ adapter: found.name }, '[cascade] Printer recovered');
+      return true;
+    }
+
+    this._current     = null;
+    this._currentName = 'none';
+    logger.warn('[cascade] Re-detection found no printer — will retry on next heartbeat');
+    return false;
+  }
+
+  // ── Health check (drives the 10 s heartbeat recovery loop) ───────────────
+
+  async healthCheck(): Promise<boolean> {
+    // No adapter yet — initial probe
+    if (!this._current) {
+      const found = await this._probe();
+      if (found) {
+        this._current     = found.adapter;
+        this._currentName = found.name;
+        logger.info({ adapter: found.name }, '[cascade] Printer connected');
+      }
+      return !!found;
+    }
+
+    // Current adapter exists — test it
+    const ok = await this._current.healthCheck();
+    if (!ok) {
+      await this._recover('health check returned false');
+      return this._current !== null;
+    }
+    return true;
+  }
+
+  // ── Send (auto-fallback on failure) ───────────────────────────────────────
+
+  async sendRaw(buffer: Buffer): Promise<void> {
+    // Ensure we have an adapter
+    if (!this._current) {
+      const found = await this._probe();
+      if (!found) {
+        throw new Error('[cascade] No printer adapter available — is the printer connected?');
+      }
+      this._current     = found.adapter;
+      this._currentName = found.name;
+    }
+
+    try {
+      await this._current.sendRaw(buffer);
+    } catch (firstErr) {
+      logger.warn(
+        { adapter: this._currentName, err: String(firstErr) },
+        '[cascade] Send failed — switching adapter…',
+      );
+
+      const recovered = await this._recover('send failed');
+      if (!recovered || !this._current) {
+        throw new Error(
+          `[cascade] Print failed on all adapters. Last error: ${String(firstErr)}`,
+        );
+      }
+
+      // One retry on the newly selected adapter
+      await this._current.sendRaw(buffer);
+    }
+  }
+}

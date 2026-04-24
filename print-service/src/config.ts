@@ -20,7 +20,7 @@ const config: PrinterConfig = Object.freeze({
   apiPort: parseInt(process.env.PRINT_API_PORT || '5001', 10),
   logLevel: process.env.LOG_LEVEL || 'info',
   sendTimeoutMs: parseInt(process.env.PRINT_SEND_TIMEOUT_MS || '1000', 10),
-  healthPollMs: parseInt(process.env.PRINT_HEALTH_POLL_MS || '30000', 10),
+  healthPollMs: parseInt(process.env.PRINT_HEALTH_POLL_MS || '10000', 10),  // 10 s for self-healing
   // ── Phase 1: driverless mode ──────────────────────────────────────────────
   printMode:       (rawPrintMode === 'RAW_DIRECT' ? 'RAW_DIRECT' : 'WINDOWS') as 'WINDOWS' | 'RAW_DIRECT',
   printerInterface:(rawInterface === 'COM'        ? 'COM'        : 'USB')      as 'USB' | 'COM',
