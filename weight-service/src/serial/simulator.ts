@@ -2,7 +2,10 @@ import { MockBinding } from '@serialport/binding-mock';
 import type { SerialPort } from 'serialport';
 import logger from '../utils/logger.js';
 
-export const SIMULATED_PATH = '/dev/SIMULATED';
+// MockBinding requires a valid-looking port name for each platform.
+// '/dev/SIMULATED' is rejected by serialport on Windows; use a high COM number
+// that is virtually guaranteed to not exist as a real device.
+export const SIMULATED_PATH = process.platform === 'win32' ? 'COM99' : '/dev/SIMULATED';
 const EMIT_INTERVAL_MS = 200; // 5 Hz
 
 type SimPhase = 'idle' | 'settling' | 'stable' | 'removing';

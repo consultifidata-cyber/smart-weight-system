@@ -10,8 +10,8 @@ async function main(): Promise<void> {
   );
 
   try {
-    // Create printer driver
-    const driver = createDriver(config);
+    // Create printer driver (async in Phase 2 — may run USB auto-detection)
+    const driver = await createDriver(config);
 
     // Health check on startup
     let printerConnected = await driver.healthCheck();

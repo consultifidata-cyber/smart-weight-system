@@ -3,6 +3,7 @@ import logger from './utils/logger.js';
 import { StabilityDetector } from './stability/detector.js';
 import { WeightReader } from './serial/reader.js';
 import { WeightSimulator, SIMULATED_PATH } from './serial/simulator.js';
+import { detectScales } from './hardware/scaleDetect.js';
 import { createServer } from './api/server.js';
 import type { WeightReading } from './types.js';
 
@@ -26,6 +27,43 @@ async function main(): Promise<void> {
     readerOptions.binding = binding;
     serialPort = SIMULATED_PATH;
     logger.info('Using simulated serial port');
+  } else if (config.serial.scaleAutoDetect && !config.serial.portExplicit) {
+    // SCALE_AUTO_DETECT=true with no explicit SERIAL_PORT: resolve port at startup.
+    // This runs BEFORE WeightReader.open(), so the resolved port is used from
+    // the first connection attempt (rather than falling back after 3 failures).
+    logger.info('[startup] SCALE_AUTO_DETECT=true, no explicit SERIAL_PORT — running detection');
+    const detected = await detectScales();
+    if (detected.selected) {
+      serialPort = detected.selected.path;
+      logger.info(
+        {
+          port:       serialPort,
+          confidence: detected.selected.confidence,
+          reason:     detected.selectionReason,
+          vid:        detected.selected.vendorId,
+        },
+        '[startup] Auto-detected scale port',
+      );
+    } else {
+      logger.warn(
+        { reason: detected.selectionReason, fallback: serialPort },
+        '[startup] No scale port detected — falling back to configured default',
+      );
+    }
+  } else if (config.serial.scaleAutoDetect && config.serial.portExplicit) {
+    // SCALE_AUTO_DETECT=true but SERIAL_PORT is set: use configured port,
+    // log all detected candidates as informational context for the operator.
+    const detected = await detectScales();
+    logger.info(
+      {
+        configuredPort: serialPort,
+        candidates: detected.ports.map(p => ({
+          path: p.path, confidence: p.confidence, reason: p.reason,
+        })),
+        note: 'SERIAL_PORT override active — candidates shown for reference only',
+      },
+      '[startup] Scale candidates detected (SERIAL_PORT takes precedence)',
+    );
   }
 
   const weightReader = new WeightReader(

@@ -6,7 +6,9 @@ import type { AppConfig } from './types.js';
 // fallback resolves from cwd (service dir) up one level to project root.
 dotenvConfig({ path: process.env.DOTENV_PATH || resolve(process.cwd(), '..', '.env') });
 
-const simulate = process.env.SIMULATE_SERIAL === 'true';
+const simulate      = process.env.SIMULATE_SERIAL === 'true';
+const portExplicit  = !!process.env.SERIAL_PORT;
+const scaleAutoDetect = (process.env.SCALE_AUTO_DETECT || 'false').toLowerCase() === 'true';
 
 const config: AppConfig = Object.freeze({
   stationId: process.env.STATION_ID || 'ST01',
@@ -18,6 +20,8 @@ const config: AppConfig = Object.freeze({
     parity: process.env.SERIAL_PARITY || 'none',
     stopBits: parseInt(process.env.SERIAL_STOP_BITS!, 10) || 1,
     simulate,
+    scaleAutoDetect,
+    portExplicit,
   }),
 
   api: Object.freeze({

@@ -44,6 +44,12 @@ export interface SerialConfig {
   parity: string;
   stopBits: number;
   simulate: boolean;
+  /** When true and SERIAL_PORT is not explicitly set, run scaleDetect at startup
+   *  to resolve the best USB-serial port automatically. */
+  scaleAutoDetect: boolean;
+  /** True when SERIAL_PORT was explicitly set in the environment (not defaulted).
+   *  Used by index.ts to decide whether to run auto-detection at startup. */
+  portExplicit: boolean;
 }
 
 export interface AppConfig {

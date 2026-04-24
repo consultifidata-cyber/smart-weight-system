@@ -1,4 +1,5 @@
 import type { PrinterDriver, LabelData } from '../types.js';
+import type { PrintAdapter } from '../adapters/printAdapter.js';
 import { exec } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -23,13 +24,25 @@ export class TSPLDriver implements PrinterDriver {
   private labelWidth: number;
   private labelHeight: number;
   private dpi: number;
+  // Phase 1: when set, all send/health/reset calls route through this adapter
+  // instead of the Windows spooler path. Existing sendWin / healthCheckWin /
+  // resetPrinterWin methods are left entirely intact for WINDOWS mode.
+  private readonly adapter: PrintAdapter | null;
 
-  constructor(device: string, labelWidth: number, labelHeight: number, dpi: number = 203, printerName?: string) {
+  constructor(
+    device: string,
+    labelWidth: number,
+    labelHeight: number,
+    dpi: number = 203,
+    printerName?: string,
+    adapter?: PrintAdapter,
+  ) {
     this.device = device;
     this.printerName = printerName || device;
     this.labelWidth = labelWidth;
     this.labelHeight = labelHeight;
     this.dpi = dpi;
+    this.adapter = adapter ?? null;
   }
 
   // ── Shared label-building core ──────────────────────────────────────────
@@ -173,8 +186,15 @@ export class TSPLDriver implements PrinterDriver {
     }
   }
 
-  /** Generic dispatcher — auto-detects platform. */
+  /**
+   * Generic dispatcher.
+   * RAW_DIRECT mode: routes through the injected PrintAdapter (driverless).
+   * WINDOWS mode   : falls through to existing sendWin / sendLinux (unchanged).
+   */
   async send(commands: Buffer, timeoutMs?: number): Promise<void> {
+    if (this.adapter) {
+      return this.adapter.sendRaw(commands);
+    }
     return process.platform === 'linux'
       ? this.sendLinux(commands, timeoutMs)
       : this.sendWin(commands, timeoutMs);
@@ -211,8 +231,15 @@ export class TSPLDriver implements PrinterDriver {
     }
   }
 
-  /** Generic dispatcher — auto-detects platform. */
+  /**
+   * Generic dispatcher.
+   * RAW_DIRECT mode: asks the adapter whether the device is reachable.
+   * WINDOWS mode   : falls through to existing healthCheckWin / healthCheckLinux.
+   */
   async healthCheck(timeoutMs?: number): Promise<boolean> {
+    if (this.adapter) {
+      return this.adapter.healthCheck();
+    }
     return process.platform === 'linux'
       ? this.healthCheckLinux(timeoutMs)
       : this.healthCheckWin(timeoutMs);
@@ -269,8 +296,19 @@ export class TSPLDriver implements PrinterDriver {
     await new Promise(r => setTimeout(r, 3000));
   }
 
-  /** Generic dispatcher — auto-detects platform. */
+  /**
+   * Generic dispatcher.
+   * RAW_DIRECT mode: no spooler involved — clear the adapter's cached device
+   *   path so it re-discovers on the next send (handles USB re-enumeration).
+   * WINDOWS mode   : falls through to existing resetPrinterWin / resetPrinterLinux.
+   */
   async resetPrinter(): Promise<void> {
+    if (this.adapter) {
+      // Force re-discovery: UsbPrintAdapter clears resolvedPath on healthCheck failure.
+      // Calling healthCheck here achieves the re-probe without touching the spooler.
+      await this.adapter.healthCheck().catch(() => {});
+      return;
+    }
     return process.platform === 'linux'
       ? this.resetPrinterLinux()
       : this.resetPrinterWin();

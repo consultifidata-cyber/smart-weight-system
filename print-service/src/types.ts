@@ -68,4 +68,20 @@ export interface PrinterConfig {
   logLevel: string;
   sendTimeoutMs: number;
   healthPollMs: number;
+  // ── Phase 1: driverless printing ──────────────────────────────────────────
+  /** 'WINDOWS' = existing copy/b spooler path (default, backwards-compat).
+   *  'RAW_DIRECT' = driverless USB or COM send via PrintAdapter. */
+  printMode: 'WINDOWS' | 'RAW_DIRECT';
+  /** Active only when printMode = 'RAW_DIRECT'. */
+  printerInterface: 'USB' | 'COM';
+  /** COM port for serial print adapter, e.g. 'COM4'. Required when printerInterface = 'COM'. */
+  printerComPort: string;
+  /** Optional explicit USB device path, e.g. '\\\\.\\USBPRIN02'. Auto-detected when empty. */
+  printerUsbDevice: string;
+  /** When true and PRINT_MODE=RAW_DIRECT, run printerDetect at startup to resolve USB path.
+   *  Ignored if PRINTER_USB_DEVICE is set explicitly. */
+  printerAutoDetect: boolean;
+  // ── Phase 4: unified hardware manager ─────────────────────────────────────
+  /** Base URL of the weight-service for inter-service calls (default: http://localhost:5000) */
+  weightServiceUrl: string;
 }

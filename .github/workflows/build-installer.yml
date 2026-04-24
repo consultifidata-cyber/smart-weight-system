@@ -1,0 +1,207 @@
+name: Build Windows Installer
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'      # v1.0.0, v1.2.3, etc.
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'    # v1.0.0-beta.1, etc.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string (e.g. v1.0.0)'
+        required: true
+        default: 'v0.0.1-dev'
+
+# ── CRITICAL: NODE_VERSION must be identical in setup-node AND portable download
+# The .node native binaries compiled during `npm ci` are tied to this ABI.
+# Changing one without the other will cause "module compiled against different
+# Node.js version" errors at runtime.
+env:
+  NODE_VERSION: '24.11.1'
+
+jobs:
+  build-installer:
+    name: Build SmartWeightSetup.exe
+    runs-on: windows-latest   # Windows Server 2022 — has VS Build Tools pre-installed
+
+    steps:
+      # ── 1. Source ────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Node.js (MUST match NODE_VERSION above) ───────────────────────────
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify Node.js version matches pin
+        run: |
+          $actual = node --version
+          $expected = "v${{ env.NODE_VERSION }}"
+          if ($actual -ne $expected) {
+            Write-Error "Node version mismatch: got $actual, expected $expected"
+            exit 1
+          }
+          Write-Host "Node.js version confirmed: $actual"
+          Write-Host "ABI module version: $(node -e 'console.log(process.versions.modules)')"
+        shell: pwsh
+
+      # ── 3. Install all dependencies including native module compilation ───────
+      - name: Install workspace dependencies (npm ci)
+        run: npm ci
+        # windows-latest has VS Build Tools — serialport + better-sqlite3
+        # will download pre-built binaries first; compile if pre-built unavailable.
+
+      # ── 4. Smoke-test native modules loaded against this exact Node.js ────────
+      - name: Verify native modules load
+        # npm workspaces hoists all packages to root node_modules
+        run: |
+          node -e "require('./node_modules/better-sqlite3');         console.log('better-sqlite3 OK')"
+          node -e "require('./node_modules/@serialport/bindings-cpp'); console.log('serialport OK')"
+          node -e "require('./node_modules/usb');                     console.log('usb (libusb) OK')"
+        shell: cmd
+
+      # ── 5. Download portable Node.js (SAME version — pins the ABI) ───────────
+      - name: Download Node.js portable runtime
+        run: |
+          $ver = "${{ env.NODE_VERSION }}"
+          $url = "https://nodejs.org/dist/v${ver}/node-v${ver}-win-x64.zip"
+          $out = "installer\assets\node-portable.zip"
+
+          New-Item -ItemType Directory -Force -Path "installer\assets" | Out-Null
+          Write-Host "Downloading $url"
+          Invoke-WebRequest $url -OutFile $out
+
+          Expand-Archive $out -DestinationPath "installer\assets\"
+          Rename-Item "installer\assets\node-v${ver}-win-x64" "installer\assets\node-runtime"
+
+          # Verify: node.exe must exist
+          $nodeExe = "installer\assets\node-runtime\node.exe"
+          if (-not (Test-Path $nodeExe)) { throw "node.exe not found after extraction" }
+
+          # Verify: must match pinned version
+          $runtimeVer = & $nodeExe --version
+          if ($runtimeVer -ne "v$ver") { throw "Portable runtime version $runtimeVer != pinned v$ver" }
+          Write-Host "Portable runtime verified: $runtimeVer"
+        shell: pwsh
+
+      # ── 6. Download and verify NSSM ───────────────────────────────────────────
+      - name: Download NSSM
+        run: |
+          $nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
+          Invoke-WebRequest $nssmUrl -OutFile "nssm.zip"
+
+          $hash = (Get-FileHash "nssm.zip" -Algorithm SHA256).Hash
+          Write-Host "NSSM zip SHA256: $hash"
+          # Update EXPECTED_HASH after first successful build and pin it here:
+          # if ($hash -ne 'EXPECTED_SHA256') { throw "NSSM hash mismatch" }
+
+          Expand-Archive "nssm.zip" -DestinationPath "nssm-extracted\"
+          New-Item -ItemType Directory -Force "installer\assets\tools" | Out-Null
+          Copy-Item "nssm-extracted\nssm-2.24\win64\nssm.exe" "installer\assets\tools\nssm.exe"
+
+          Write-Host "NSSM ready: installer\assets\tools\nssm.exe"
+        shell: pwsh
+
+      # ── 7. Resolve version string ─────────────────────────────────────────────
+      - name: Resolve version string
+        id: version
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $ver = '${{ github.event.inputs.version }}'
+          } else {
+            $ver = '${{ github.ref_name }}'
+          }
+          # Strip leading 'v' for Inno Setup AppVersion
+          $appVer = $ver.TrimStart('v')
+          Write-Host "Tag: $ver  AppVersion: $appVer"
+          echo "tag=$ver"        >> $env:GITHUB_OUTPUT
+          echo "appver=$appVer"  >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      # ── 8. Install Inno Setup 6 ───────────────────────────────────────────────
+      - name: Install Inno Setup 6
+        run: choco install innosetup --version=6.3.3 --yes --no-progress
+        shell: cmd
+
+      # ── 9. Compile installer ──────────────────────────────────────────────────
+      - name: Compile SmartWeightSetup.exe
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
+
+          & $iscc `
+            /DAppVersion="${{ steps.version.outputs.appver }}" `
+            "installer\setup.iss"
+
+          if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed with exit code $LASTEXITCODE" }
+        shell: pwsh
+
+      # ── 10. Verify output ─────────────────────────────────────────────────────
+      - name: Verify installer size
+        run: |
+          $exe = "installer\Output\SmartWeightSetup.exe"
+          if (-not (Test-Path $exe)) { throw "Installer not found: $exe" }
+          $sizeMB = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          Write-Host "Installer size: $sizeMB MB"
+          if ($sizeMB -lt 30) { throw "Installer suspiciously small ($sizeMB MB) — check bundling" }
+          Write-Host "Installer verified OK: $exe ($sizeMB MB)"
+        shell: pwsh
+
+      # ── 11. Upload as workflow artifact (every build) ─────────────────────────
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartWeightSetup-${{ steps.version.outputs.tag }}
+          path: installer/Output/SmartWeightSetup.exe
+          retention-days: 30
+
+      # ── 12. Create GitHub Release (tagged builds only) ─────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Smart Weight System ${{ steps.version.outputs.tag }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: installer/Output/SmartWeightSetup.exe
+          body: |
+            ## Smart Weight System ${{ steps.version.outputs.tag }}
+
+            ### Download
+            **SmartWeightSetup.exe** — Windows 10/11 x64 installer
+
+            ### Requirements
+            - Windows 10/11 x64
+            - Label printer connected via USB
+            - Weighing scale connected via USB-serial cable
+            - Network access to Django ERP server
+
+            ### Installation (~2 minutes)
+            1. Download `SmartWeightSetup.exe`
+            2. Right-click → **Run as Administrator**
+            3. Hardware Detection page → confirm printer + COM port
+            4. Enter Server URL and API Token
+            5. Enter Plant ID and Station ID
+            6. Click **Install**
+            7. Browser opens automatically at http://localhost:3000
+
+            ### What gets installed
+            - Application to `C:\SmartWeightSystem\`
+            - Windows Service `SmartWeightSystem` (auto-start on boot)
+            - Firewall rules for ports 3000, 5000, 5001, 5002, 5099
+            - Node.js runtime v${{ env.NODE_VERSION }} (bundled — no system install needed)
+
+            ### Verify
+            ```
+            curl http://localhost:5099/health
+            curl http://localhost:3000
+            ```
+
+            ### Built with
+            - Node.js: v${{ env.NODE_VERSION }}
+            - Inno Setup: 6.3.3
+            - NSSM: 2.24
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}

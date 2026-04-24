@@ -1,6 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import { printRouter } from './routes/print.js';
+import { hardwareRouter } from './routes/hardware.js';
 import logger from '../utils/logger.js';
 import type { PrinterDriver, PrinterConfig } from '../types.js';
 
@@ -32,6 +33,7 @@ export function createServer(
 
   // Routes
   app.use('/print', printRouter);
+  app.use('/hardware', hardwareRouter);
   app.get('/health', (req: Request, res: Response) => {
     res.json({
       service: 'print-service',

@@ -6,6 +6,9 @@ import type { PrinterConfig } from './types.js';
 // fallback resolves from cwd (service dir) up one level to project root.
 dotenvConfig({ path: process.env.DOTENV_PATH || resolve(process.cwd(), '..', '.env') });
 
+const rawPrintMode = (process.env.PRINT_MODE || 'WINDOWS').toUpperCase();
+const rawInterface = (process.env.PRINTER_INTERFACE || 'USB').toUpperCase();
+
 const config: PrinterConfig = Object.freeze({
   driver: process.env.PRINTER_DRIVER || 'tspl',
   device: process.env.PRINTER_DEVICE || 'TVSLP46NEO',
@@ -18,6 +21,14 @@ const config: PrinterConfig = Object.freeze({
   logLevel: process.env.LOG_LEVEL || 'info',
   sendTimeoutMs: parseInt(process.env.PRINT_SEND_TIMEOUT_MS || '1000', 10),
   healthPollMs: parseInt(process.env.PRINT_HEALTH_POLL_MS || '30000', 10),
+  // ── Phase 1: driverless mode ──────────────────────────────────────────────
+  printMode:       (rawPrintMode === 'RAW_DIRECT' ? 'RAW_DIRECT' : 'WINDOWS') as 'WINDOWS' | 'RAW_DIRECT',
+  printerInterface:(rawInterface === 'COM'        ? 'COM'        : 'USB')      as 'USB' | 'COM',
+  printerComPort:   process.env.PRINTER_COM_PORT   || '',
+  printerUsbDevice: process.env.PRINTER_USB_DEVICE  || '',
+  printerAutoDetect:(process.env.PRINTER_AUTO_DETECT || 'false').toLowerCase() === 'true',
+  // Phase 4: weight-service base URL for inter-service hardware queries
+  weightServiceUrl: process.env.WEIGHT_SERVICE_URL || 'http://localhost:5000',
 });
 
 export default config;
