@@ -355,19 +355,20 @@ begin
   end;
 end;
 
+// ── Escape a string for use inside PowerShell single-quoted strings ──────────
+// Standalone (Inno Setup Pascal does not support nested functions).
+function EscPS(const S: String): String;
+begin
+  Result := S;
+  StringChangeEx(Result, '''', '''''', True);
+end;
+
 // ── Build PowerShell parameter string for generate-env.ps1 ───────────────────
 // Called by [Run] section via {code:GetEnvParameters}
 function GetEnvParameters(Param: String): String;
 var
   InstallDir, PrinterPath, PrinterIface, ScalePort: String;
   DjangoUrl, DjangoToken, PlantId, StationId: String;
-
-  function EscPS(const S: String): String;
-  begin
-    Result := S;
-    StringChangeEx(Result, '''', '''''', True);
-  end;
-
 begin
   InstallDir   := ExpandConstant('{app}');
   PrinterPath  := GetSelectedPrinterPath;
@@ -571,16 +572,27 @@ function UpdateReadyMemo(
   Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo,
   MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
 var
-  PPath, SPort: String;
+  PPath, SPort, PrinterLine, ScaleLine: String;
 begin
   PPath := GetSelectedPrinterPath;
   SPort := GetSelectedScalePort;
 
+  // Inno Setup Pascal has no inline-if — use explicit if/else blocks
+  if PPath <> '' then
+    PrinterLine := PPath + ' [' + GetSelectedPrinterIface + ']'
+  else
+    PrinterLine := '(auto-detect at runtime)';
+
+  if SPort <> '' then
+    ScaleLine := SPort
+  else
+    ScaleLine := '(auto-detect at runtime)';
+
   Result :=
     'Installation Summary' + NewLine + NewLine +
     Space + 'Install folder : C:\SmartWeightSystem' + NewLine +
-    Space + 'Printer device : ' + (if PPath <> '' then PPath + ' [' + GetSelectedPrinterIface + ']' else '(auto-detect at runtime)') + NewLine +
-    Space + 'Scale COM port : ' + (if SPort <> '' then SPort else '(auto-detect at runtime)') + NewLine +
+    Space + 'Printer device : ' + PrinterLine + NewLine +
+    Space + 'Scale COM port : ' + ScaleLine + NewLine +
     Space + 'Server URL     : ' + PageServer.Values[0] + NewLine +
     Space + 'Station ID     : ' + PageStation.Values[1] + NewLine +
     Space + 'Plant ID       : ' + PageStation.Values[0] + NewLine + NewLine +
