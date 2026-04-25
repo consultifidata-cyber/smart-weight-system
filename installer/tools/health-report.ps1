@@ -129,7 +129,75 @@ if (Test-Path $envPath) {
         Set-Content "$reportDir\env-masked.txt" -Encoding UTF8
 }
 
-# ── 8. Node.js runtime version ────────────────────────────────────────────────
+# ── 8. Phase E: USB-serial adapter + driver audit ─────────────────────────────
+Write-Host '  USB-serial adapters and driver versions...'
+$adapterReport = @()
+
+$usbSerialDevices = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+    Where-Object { $_.InstanceId -match 'USB\\VID_(1A86|0403|10C4|067B|04D8)' -and $_.Status -eq 'OK' }
+
+foreach ($dev in $usbSerialDevices) {
+    $driverInfo = Get-WmiObject Win32_PnPSignedDriver -ErrorAction SilentlyContinue |
+        Where-Object { $_.DeviceID -eq $dev.InstanceId } |
+        Select-Object -First 1
+
+    $ver = if ($driverInfo) { $driverInfo.DriverVersion } else { 'unknown' }
+    $date = if ($driverInfo) { $driverInfo.DriverDate } else { 'unknown' }
+
+    $warning = $null
+    # CH340 driver versions 3.4.x and 3.5.x have a known data-freeze bug
+    # where the driver stops delivering bytes after the first successful read.
+    # Version 3.8+ fixes this.
+    if ($ver -match '^3\.[45]\.') {
+        $warning = "BUGGY CH340 DRIVER $ver detected. Upgrade to 3.8+ from http://www.wch.cn/products/CH340.html"
+    }
+
+    $entry = [PSCustomObject]@{
+        Name    = $dev.FriendlyName
+        VID     = ([regex]::Match($dev.InstanceId, 'VID_([0-9A-Fa-f]{4})')).Groups[1].Value
+        Version = $ver
+        Date    = $date
+        Warning = $warning
+    }
+    $adapterReport += $entry
+
+    if ($warning) {
+        Write-Host "  [DRIVER WARNING] $warning" -ForegroundColor Yellow
+    } else {
+        Write-Host "  Adapter OK: $($dev.FriendlyName) driver=$ver"
+    }
+}
+
+if ($adapterReport.Count -eq 0) {
+    Write-Host '  No USB-serial adapters found (scale may not be connected).'
+}
+
+$adapterReport | ConvertTo-Json | Set-Content "$reportDir\usb-serial-adapters.json" -Encoding UTF8
+
+# ── 8. USB Selective Suspend status ──────────────────────────────────────────
+Write-Host '  Checking USB Selective Suspend status...'
+$suspendStatus = @()
+$usbSerialVidPatterns = @('VID_1A86', 'VID_0403', 'VID_10C4', 'VID_067B')
+foreach ($dev in (Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object {
+    $id = $_.InstanceId; $usbSerialVidPatterns | ForEach-Object { $id -match $_ } | Where-Object { $_ }
+})) {
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($dev.InstanceId)\Device Parameters"
+    $suspendVal = if (Test-Path $regPath) {
+        (Get-ItemProperty $regPath -Name 'SelectiveSuspend' -ErrorAction SilentlyContinue).SelectiveSuspend
+    } else { $null }
+
+    $suspendStatus += [PSCustomObject]@{
+        Name            = $dev.FriendlyName
+        SelectiveSuspend = $suspendVal
+        Warning         = if ($suspendVal -ne 0) { 'USB Selective Suspend is ENABLED — may cause data freeze. Run install-service.ps1 to fix.' } else { $null }
+    }
+    if ($suspendVal -ne 0) {
+        Write-Host "  [SUSPEND WARNING] $($dev.FriendlyName): SelectiveSuspend=$suspendVal (should be 0)" -ForegroundColor Yellow
+    }
+}
+$suspendStatus | ConvertTo-Json | Set-Content "$reportDir\usb-suspend-status.json" -Encoding UTF8
+
+# ── 9. Node.js runtime version ────────────────────────────────────────────────
 $nodeExe = Join-Path $InstallDir 'node-runtime\node.exe'
 if (Test-Path $nodeExe) {
     (& $nodeExe --version 2>&1) | Set-Content "$reportDir\node-version.txt" -Encoding UTF8
@@ -166,6 +234,11 @@ foreach ($lf in $allLogs) {
     if ($text -match 'spawn.*ENOENT') {
         $diagLines += "[CRITICAL] $($lf.Name): node.exe or script not found. " +
             "Check $InstallDir\node-runtime\node.exe exists."
+    }
+    if ($text -match 'watchdog.*No scale data|forcing port reconnect') {
+        $diagLines += "[WARN] $($lf.Name): Scale data watchdog triggered. " +
+            "USB Selective Suspend may be enabled. Run install-service.ps1 to fix, " +
+            "or upgrade CH340 driver to 3.8+."
     }
 }
 

@@ -64,10 +64,13 @@ router.get('/health', (req: Request, res: Response) => {
     version: '1.0.0',
     uptime: Math.floor(process.uptime()),
     serial: {
-      port: config.serial.simulate ? 'SIMULATED' : config.serial.port,
+      port:           config.serial.simulate ? 'SIMULATED' : config.serial.port,
       connected,
-      simulate: config.serial.simulate,
+      simulate:       config.serial.simulate,
       lastReadingAge,
+      // Phase E: watchdog metrics for diagnostics
+      dataAgeSec:     weightReader.dataAgeSec,
+      watchdogMs:     weightReader.watchdogMs,
     },
   };
 

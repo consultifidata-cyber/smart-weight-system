@@ -50,6 +50,10 @@ export interface SerialConfig {
   /** True when SERIAL_PORT was explicitly set in the environment (not defaulted).
    *  Used by index.ts to decide whether to run auto-detection at startup. */
   portExplicit: boolean;
+  /** Phase E: if no bytes arrive for this many ms while the port is open,
+   *  force-close and reopen. Fixes Windows USB Selective Suspend freeze.
+   *  0 = disabled (for testing / simulator). Default: 15000 (15 s). */
+  noDataTimeoutMs: number;
 }
 
 export interface AppConfig {

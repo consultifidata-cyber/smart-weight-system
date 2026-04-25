@@ -22,6 +22,8 @@ const config: AppConfig = Object.freeze({
     simulate,
     scaleAutoDetect,
     portExplicit,
+    // Phase E: no-data watchdog. 0 = disabled (simulator auto-disables).
+    noDataTimeoutMs: parseInt(process.env.SCALE_NO_DATA_TIMEOUT_MS || '15000', 10),
   }),
 
   api: Object.freeze({

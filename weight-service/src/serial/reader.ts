@@ -23,6 +23,8 @@ export interface WeightReaderConfig {
   dataBits: number;
   parity: string;
   stopBits: number;
+  /** Phase E: force-close port if no data received for this many ms (0 = disabled). */
+  noDataTimeoutMs?: number;
 }
 
 export interface WeightReaderOptions {
@@ -41,11 +43,30 @@ export class WeightReader extends EventEmitter {
   private autoDetectDone = false;
   private configuredPort: string;
 
+  // Phase E: no-data watchdog ─────────────────────────────────────────────────
+  // Fixes the "one bag works then weight freezes" symptom caused by Windows USB
+  // Selective Suspend putting the CH340/FTDI adapter into low-power mode while
+  // port.isOpen stays true — no close/error event fires, so openWithRetry()
+  // would never trigger without this watchdog.
+  private lastDataAt = 0;                                            // epoch ms of last line received
+  private noDataWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly noDataTimeoutMs: number;
+
+  // How often the watchdog interval fires (at most every 5 s, at least timeout/3).
+  // Using timeout/3 catches a freeze within one full timeout window.
+  private get _watchdogIntervalMs(): number {
+    return Math.min(Math.ceil(this.noDataTimeoutMs / 3), 5000);
+  }
+
   constructor(serialConfig: WeightReaderConfig, options: WeightReaderOptions = {}) {
     super();
-    this.serialConfig = serialConfig;
+    this.serialConfig   = serialConfig;
     this.configuredPort = serialConfig.port;
-    this.binding = options.binding || undefined;
+    this.binding        = options.binding || undefined;
+    // Disable watchdog for simulator (binding present) or when explicitly set to 0
+    this.noDataTimeoutMs = (options.binding || (serialConfig.noDataTimeoutMs ?? 0) <= 0)
+      ? 0
+      : (serialConfig.noDataTimeoutMs ?? 15000);
   }
 
   async open(): Promise<void> {
@@ -90,14 +111,13 @@ export class WeightReader extends EventEmitter {
       const timer = setTimeout(() => {
         if (!settled) {
           settled = true;
-          // Force-close the port to prevent late callback
           try { this.port?.close(); } catch { /* ignore */ }
           reject(new Error(`Timeout opening ${this.serialConfig.port} (${OPEN_TIMEOUT_MS}ms)`));
         }
       }, OPEN_TIMEOUT_MS);
 
       this.port!.open((err: Error | null) => {
-        if (settled) return; // timeout already fired
+        if (settled) return;
         settled = true;
         clearTimeout(timer);
         if (err) {
@@ -106,11 +126,56 @@ export class WeightReader extends EventEmitter {
           return;
         }
         this.reconnectAttempts = 0;
-        logger.info({ port: this.serialConfig.port, baudRate: this.serialConfig.baudRate }, 'Serial port opened');
+        this.lastDataAt = Date.now();      // Phase E: reset clock on successful open
+        this._startNoDataWatchdog();       // Phase E: begin watching for data silence
+        logger.info(
+          {
+            port:            this.serialConfig.port,
+            baudRate:        this.serialConfig.baudRate,
+            watchdogMs:      this.noDataTimeoutMs || 'disabled',
+          },
+          'Serial port opened',
+        );
         this.emit('open');
         resolve();
       });
     });
+  }
+
+  // ── Phase E: no-data watchdog ──────────────────────────────────────────────
+
+  private _startNoDataWatchdog(): void {
+    if (!this.noDataTimeoutMs) return;   // disabled
+    this._stopNoDataWatchdog();
+
+    this.noDataWatchdogTimer = setInterval(() => {
+      if (!this.port?.isOpen || this.closing) return;
+
+      const silentMs = Date.now() - this.lastDataAt;
+      if (silentMs >= this.noDataTimeoutMs) {
+        logger.warn(
+          {
+            port:      this.serialConfig.port,
+            silentMs,
+            threshold: this.noDataTimeoutMs,
+          },
+          '[watchdog] No scale data received — forcing port reconnect ' +
+          '(likely USB Selective Suspend or CH340 driver freeze)',
+        );
+        this._stopNoDataWatchdog();
+        // Force-close the port.  _onClose() fires → openWithRetry() restarts.
+        // This is identical to a physical USB disconnect/reconnect from the
+        // software perspective.
+        try { this.port!.close(); } catch { /* _onClose() will handle */ }
+      }
+    }, this._watchdogIntervalMs);
+  }
+
+  private _stopNoDataWatchdog(): void {
+    if (this.noDataWatchdogTimer) {
+      clearInterval(this.noDataWatchdogTimer);
+      this.noDataWatchdogTimer = null;
+    }
   }
 
   async openWithRetry(): Promise<void> {
@@ -236,6 +301,7 @@ export class WeightReader extends EventEmitter {
   }
 
   private _onLine(rawLine: string): void {
+    this.lastDataAt = Date.now();   // Phase E: heartbeat — resets the watchdog clock
     const reading: WeightReading | null = parse(rawLine);
     if (reading) {
       this.emit('reading', reading);
@@ -250,13 +316,14 @@ export class WeightReader extends EventEmitter {
   }
 
   private _onClose(): void {
+    this._stopNoDataWatchdog();   // Phase E: stop watchdog before reconnect
     logger.warn('Serial port closed');
     this.emit('close');
 
     if (!this.closing) {
       this.reconnectAttempts = 0;
       this.lastLogAt = 0;
-      this.autoDetectDone = false; // Allow auto-detection again on next disconnect
+      this.autoDetectDone = false;
       logger.info('Attempting reconnection...');
       this.openWithRetry().catch(() => {});
     }
@@ -264,6 +331,7 @@ export class WeightReader extends EventEmitter {
 
   async close(): Promise<void> {
     this.closing = true;
+    this._stopNoDataWatchdog();   // Phase E
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -285,5 +353,15 @@ export class WeightReader extends EventEmitter {
 
   get isConnected(): boolean {
     return this.port?.isOpen ?? false;
+  }
+
+  /** Phase E: milliseconds since the last raw line was received (0 if never). */
+  get dataAgeSec(): number {
+    return this.lastDataAt ? Math.floor((Date.now() - this.lastDataAt) / 1000) : 0;
+  }
+
+  /** Phase E: configured watchdog timeout in ms (0 = disabled). */
+  get watchdogMs(): number {
+    return this.noDataTimeoutMs;
   }
 }

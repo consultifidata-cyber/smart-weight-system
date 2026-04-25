@@ -236,6 +236,42 @@ Write-Host '-- Configuring service parameters...'
 
 Write-Host '   All parameters set.' -ForegroundColor Green
 
+# ── Phase E: Disable USB Selective Suspend for weighing-scale adapters ────────
+# Windows power management can silently suspend CH340/FTDI/CP210x adapters while
+# the serial port handle stays "open" in Node.js — no close/error event fires.
+# The software watchdog handles recovery, but disabling suspend prevents it entirely.
+Write-Host '-- Disabling USB Selective Suspend for USB-serial adapters...'
+
+$usbSerialVidPatterns = @('VID_1A86', 'VID_0403', 'VID_10C4', 'VID_067B', 'VID_04D8')
+$devicesPatched = 0
+
+try {
+    $usbDevices = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object {
+            $id = $_.InstanceId
+            $usbSerialVidPatterns | ForEach-Object { $id -match $_ } | Where-Object { $_ }
+        }
+
+    foreach ($dev in $usbDevices) {
+        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\$($dev.InstanceId)\Device Parameters"
+        if (Test-Path $regPath) {
+            Set-ItemProperty $regPath -Name 'SelectiveSuspend' -Value 0 -Type DWord -ErrorAction SilentlyContinue
+            $devicesPatched++
+            Write-Host "   Disabled suspend: $($dev.FriendlyName)" -ForegroundColor Green
+        }
+    }
+
+    if ($devicesPatched -eq 0) {
+        Write-Host '   No USB-serial adapters found to patch (they may not be connected yet).' -ForegroundColor Yellow
+        Write-Host '   Connect the scale USB cable and re-run this script to apply the fix.'
+    } else {
+        Write-Host "   Patched $devicesPatched device(s)." -ForegroundColor Green
+    }
+} catch {
+    Write-Host "   [WARN] Could not disable USB suspend: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host '   The software watchdog (SCALE_NO_DATA_TIMEOUT_MS) will handle recovery instead.'
+}
+
 # ── Firewall rules ────────────────────────────────────────────────────────────
 Write-Host '-- Adding Windows Firewall inbound rules...'
 
