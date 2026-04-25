@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import logger from '../utils/logger.js';
 import { generateBagIdempotencyKey } from '../sync/idempotency.js';
 
-const LATEST_VERSION = 6;
+const LATEST_VERSION = 7;
 
 const migrations: Record<number, (db: Database.Database) => void> = {
   // Version 0 → 1: Core entry tables
@@ -202,6 +202,20 @@ const migrations: Record<number, (db: Database.Database) => void> = {
       { backfilled: existing.length },
       'Migration 6: fg_bag.idempotency_key added and backfilled',
     );
+  },
+
+  // Version 6 → 7: Sync attempt tracking on fg_bag (Phase D)
+  7: (db) => {
+    db.exec(`
+      ALTER TABLE fg_bag ADD COLUMN sync_attempts  INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE fg_bag ADD COLUMN last_sync_error TEXT;
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_fg_bag_sync_attempts
+        ON fg_bag(sync_attempts)
+        WHERE synced = 0
+    `);
+    logger.info('Migration 7: fg_bag.sync_attempts and last_sync_error added');
   },
 };
 

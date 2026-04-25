@@ -113,6 +113,11 @@ export interface FGBag {
    *  Null only for legacy rows created before migration 6 — the migration
    *  backfills all existing rows so null should never appear in practice. */
   idempotency_key: string | null;
+  /** Phase D: how many times this bag has been attempted to sync.
+   *  Incremented on each failed addBag() attempt.  Stays 0 on first-try success. */
+  sync_attempts: number;
+  /** Phase D: last error message from a failed addBag() attempt, or null. */
+  last_sync_error: string | null;
 }
 
 export interface FGSessionWithBags extends FGSession {

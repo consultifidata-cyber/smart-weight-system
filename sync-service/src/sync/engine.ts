@@ -38,10 +38,22 @@ export class SyncEngine {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   start(): void {
-    // Startup recovery: reset any sessions stuck in SYNCING from a previous crash
+    // Startup recovery: reset sessions stuck in SYNCING from a previous crash
     const resetCount = this.queries.resetStuckSyncingSessions();
     if (resetCount > 0) {
       logger.warn({ resetCount }, 'Reset stuck SYNCING sessions to PENDING on startup');
+    }
+
+    // Phase D: warn about stale bags (synced=0 from past dates) on startup.
+    // These will be retried automatically, but the log helps support diagnose issues.
+    const today = new Date().toISOString().substring(0, 10);
+    const staleBags = this.queries.countStaleBags(today);
+    if (staleBags > 0) {
+      logger.warn(
+        { staleBagCount: staleBags, today },
+        'Startup: unsynced bags found from previous dates — they will be retried. ' +
+        'If this count is unexpectedly high, investigate sync failures in logs.',
+      );
     }
 
     logger.info(
@@ -179,7 +191,34 @@ export class SyncEngine {
       const session = this.queries.getSession(bag.session_id);
       if (!session || !session.doc_id) continue;
 
+      // Phase D: attempt number for logging (sync_attempts = number of PAST failures)
+      const attemptNum = (bag.sync_attempts ?? 0) + 1;
+
+      // Warn early when a bag has been retried many times without success
+      if (attemptNum > 5) {
+        logger.warn(
+          {
+            bagId:    bag.bag_id,
+            qrCode:   bag.qr_code,
+            key:      bag.idempotency_key?.substring(0, 8),
+            attempts: attemptNum,
+          },
+          '[bag-sync] High retry count — bag may be stuck. Check server logs.',
+        );
+      }
+
       try {
+        logger.debug(
+          {
+            attempt:  attemptNum,
+            bagId:    bag.bag_id,
+            qrCode:   bag.qr_code,
+            key:      bag.idempotency_key?.substring(0, 8) ?? 'null',
+            docId:    session.doc_id,
+          },
+          '[bag-sync] Pushing bag to Django',
+        );
+
         const resp = await this.client.addBag({
           doc_id: session.doc_id,
           item_id: bag.item_id,
@@ -191,39 +230,93 @@ export class SyncEngine {
           note: bag.note,
           worker_code_1: bag.worker_code_1,
           worker_code_2: bag.worker_code_2,
-          idempotency_key: bag.idempotency_key ?? undefined,  // Phase B
+          idempotency_key: bag.idempotency_key ?? undefined,
         });
 
         this.queries.updateBagSynced(bag.bag_id, resp.line_id);
 
         if (resp.idempotent) {
-          // Phase B: Django confirmed this bag already existed (Phase C server support).
-          // Mark as synced — no new row was created.
+          // Server already had this bag (Phase B key or Phase C QR dedup).
+          // One row exists on Django — no duplicate created.
           logger.info(
-            { bagId: bag.bag_id, qrCode: bag.qr_code },
-            'Bag already on server (idempotent response) — marked synced, no duplicate created',
+            {
+              attempt:   attemptNum,
+              bagId:     bag.bag_id,
+              qrCode:    bag.qr_code,
+              lineId:    resp.line_id,
+              httpStatus: 200,
+              result:    'idempotent',
+            },
+            '[bag-sync] Bag already on server — marked synced, no duplicate',
           );
         } else {
           logger.info(
-            { bagId: bag.bag_id, qrCode: bag.qr_code, lineId: resp.line_id },
-            'Bag synced to Django',
+            {
+              attempt:    attemptNum,
+              bagId:      bag.bag_id,
+              qrCode:     bag.qr_code,
+              lineId:     resp.line_id,
+              httpStatus: 200,
+              result:     'created',
+            },
+            '[bag-sync] Bag synced to Django',
           );
         }
+
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
+        const isTimeout = error.includes('AbortError') ||
+                          error.includes('TimeoutError') ||
+                          error.includes('signal timed out');
 
-        // 409 = session was closed externally (dispatch-triggered post+approve)
+        // Persist the failure — increment attempts, record last error
+        this.queries.incrementBagSyncAttempts(bag.bag_id, error);
+
+        // 409 = session was closed externally (dispatch-triggered post+approve).
+        // Note: a QR-duplicate 409 would be impossible here because Phase C returns
+        // 200 + idempotent:true for duplicate QRs; 409 is strictly "doc not DRAFT".
         if (error.includes('409')) {
           logger.warn(
-            { sessionId: bag.session_id, bagId: bag.bag_id },
-            'Session closed externally (409) — initiating rollover',
+            {
+              attempt:    attemptNum,
+              sessionId:  bag.session_id,
+              bagId:      bag.bag_id,
+              httpStatus: 409,
+              result:     'session_closed_externally',
+            },
+            '[bag-sync] Session closed externally — initiating rollover',
           );
           await this.handleSessionRollover(session, today);
-          // Stop processing this batch — next cycle will pick up moved bags
           break;
         }
 
-        logger.warn({ bagId: bag.bag_id, error }, 'Failed to sync bag — will retry next cycle');
+        // Timeout: the server may have saved the bag before the connection dropped.
+        // The idempotency_key ensures the next attempt will return idempotent:true.
+        if (isTimeout) {
+          logger.warn(
+            {
+              attempt:    attemptNum,
+              bagId:      bag.bag_id,
+              qrCode:     bag.qr_code,
+              key:        bag.idempotency_key?.substring(0, 8) ?? 'null',
+              result:     'timeout',
+              safeToRetry: true,
+            },
+            '[bag-sync] addBag timed out — server may have saved bag. ' +
+            'Next retry will use same idempotency_key; duplicate is prevented.',
+          );
+        } else {
+          logger.warn(
+            {
+              attempt:    attemptNum,
+              bagId:      bag.bag_id,
+              qrCode:     bag.qr_code,
+              result:     'error',
+              error,
+            },
+            '[bag-sync] Failed to sync bag — will retry next cycle',
+          );
+        }
       }
     }
   }

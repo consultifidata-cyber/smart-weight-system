@@ -217,6 +217,8 @@ router.post('/:sessionId/add-bag', async (req: Request, res: Response) => {
       worker_code_1: worker_code_1,
       worker_code_2: worker_code_2,
       idempotency_key: bagIdempotencyKey,   // Phase B
+      sync_attempts:   0,                   // Phase D
+      last_sync_error: null,                // Phase D
     };
 
     queries.insertBag(bag);
