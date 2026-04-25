@@ -1,5 +1,27 @@
 import { createHash } from 'crypto';
 
+/**
+ * Bag-level idempotency key — Phase B.
+ *
+ * Deterministic hash of (station_id, session_id, bag_number, qr_code).
+ * The same bag will ALWAYS produce the same key across:
+ *   - HTTP timeouts + retries
+ *   - service restarts
+ *   - offline queue replays
+ *
+ * Key format: 64-char lowercase hex (SHA-256 output).
+ * Stored in fg_bag.idempotency_key and sent as Idempotency-Key header.
+ */
+export function generateBagIdempotencyKey(
+  stationId:  string,
+  sessionId:  string,
+  bagNumber:  number,
+  qrCode:     string,
+): string {
+  const canonical = [stationId, sessionId, String(bagNumber), qrCode].join(':');
+  return createHash('sha256').update(canonical).digest('hex');  // 64 hex chars
+}
+
 /** Legacy idempotency key for bulk FGEntry (kept for backward compat). */
 export function generateIdempotencyKey(fields: {
   station_id: string;

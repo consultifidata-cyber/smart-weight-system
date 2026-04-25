@@ -1,7 +1,10 @@
 import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'crypto';
 import { generateQrCode } from '../../sync/qr.js';
-import { generateSessionIdempotencyKey } from '../../sync/idempotency.js';
+import {
+  generateSessionIdempotencyKey,
+  generateBagIdempotencyKey,        // Phase B
+} from '../../sync/idempotency.js';
 import logger from '../../utils/logger.js';
 import type { FGSession, FGBag } from '../../types.js';
 
@@ -151,8 +154,8 @@ router.post('/:sessionId/add-bag', async (req: Request, res: Response) => {
     worker_code_2 = null,
   } = req.body;
 
-  const bagId = randomUUID();
-  const now = new Date().toISOString();
+  const bagId     = randomUUID();
+  const now       = new Date().toISOString();
   const bagNumber = queries.getNextBagNumber(sessionId);
 
   // Generate QR code locally using the session's day_seq
@@ -161,6 +164,11 @@ router.post('/:sessionId/add-bag', async (req: Request, res: Response) => {
     session.entry_date,
     session.day_seq,
     bagNumber,
+  );
+
+  // Phase B: stable idempotency key generated before the DB insert
+  const bagIdempotencyKey = generateBagIdempotencyKey(
+    config.stationId, sessionId, bagNumber, qrCode,
   );
 
   let lineId: number | null = null;
@@ -180,6 +188,7 @@ router.post('/:sessionId/add-bag', async (req: Request, res: Response) => {
         note: note,
         worker_code_1,
         worker_code_2,
+        idempotency_key: bagIdempotencyKey,   // Phase B
       });
       lineId = resp.line_id;
       synced = 1;
@@ -207,6 +216,7 @@ router.post('/:sessionId/add-bag', async (req: Request, res: Response) => {
       created_at: now,
       worker_code_1: worker_code_1,
       worker_code_2: worker_code_2,
+      idempotency_key: bagIdempotencyKey,   // Phase B
     };
 
     queries.insertBag(bag);

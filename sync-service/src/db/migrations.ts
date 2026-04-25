@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3';
 import logger from '../utils/logger.js';
+import { generateBagIdempotencyKey } from '../sync/idempotency.js';
 
-const LATEST_VERSION = 5;
+const LATEST_VERSION = 6;
 
 const migrations: Record<number, (db: Database.Database) => void> = {
   // Version 0 → 1: Core entry tables
@@ -154,6 +155,53 @@ const migrations: Record<number, (db: Database.Database) => void> = {
       ALTER TABLE fg_bag ADD COLUMN worker_code_1 TEXT;
       ALTER TABLE fg_bag ADD COLUMN worker_code_2 TEXT;
     `);
+  },
+  // Version 5 → 6: Bag-level idempotency key (Phase B — duplicate-sync fix)
+  6: (db) => {
+    // Step 1: Add column (nullable so existing rows are valid until backfill)
+    db.exec(`ALTER TABLE fg_bag ADD COLUMN idempotency_key TEXT`);
+
+    // Step 2: Backfill all existing rows.
+    // SQLite has no built-in SHA-256, so we compute keys in TypeScript.
+    const existing = db.prepare(`
+      SELECT b.bag_id, b.session_id, b.bag_number, b.qr_code, s.station_id
+      FROM   fg_bag     b
+      JOIN   fg_session s ON b.session_id = s.session_id
+      WHERE  b.idempotency_key IS NULL
+    `).all() as Array<{
+      bag_id:     string;
+      session_id: string;
+      bag_number: number;
+      qr_code:    string;
+      station_id: string;
+    }>;
+
+    const update = db.prepare(
+      `UPDATE fg_bag SET idempotency_key = ? WHERE bag_id = ?`,
+    );
+
+    db.transaction(() => {
+      for (const row of existing) {
+        const key = generateBagIdempotencyKey(
+          row.station_id, row.session_id, row.bag_number, row.qr_code,
+        );
+        update.run(key, row.bag_id);
+      }
+    })();
+
+    // Step 3: Unique index on idempotency_key (partial — guards non-null rows only).
+    // A full NOT NULL constraint cannot be added via ALTER TABLE in SQLite; the
+    // application enforces NOT NULL at insert time (bags.ts / sessions.ts).
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_fg_bag_idempotency_key
+        ON fg_bag(idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+    `);
+
+    logger.info(
+      { backfilled: existing.length },
+      'Migration 6: fg_bag.idempotency_key added and backfilled',
+    );
   },
 };
 

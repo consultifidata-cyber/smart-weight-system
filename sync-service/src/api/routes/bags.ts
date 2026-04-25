@@ -1,7 +1,10 @@
 import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'crypto';
 import { generateQrCode } from '../../sync/qr.js';
-import { generateSessionIdempotencyKey } from '../../sync/idempotency.js';
+import {
+  generateSessionIdempotencyKey,
+  generateBagIdempotencyKey,        // Phase B
+} from '../../sync/idempotency.js';
 import logger from '../../utils/logger.js';
 import type { FGSession, FGBag } from '../../types.js';
 
@@ -92,7 +95,7 @@ router.post('/add', (req: Request, res: Response) => {
     }
 
     // Step 2: Add bag to session
-    const bagId = randomUUID();
+    const bagId    = randomUUID();
     const bagNumber = queries.getNextBagNumber(session.session_id);
 
     const qrCode = generateQrCode(
@@ -100,6 +103,12 @@ router.post('/add', (req: Request, res: Response) => {
       session.entry_date,
       session.day_seq,
       bagNumber,
+    );
+
+    // Phase B: stable idempotency key — same bag always produces the same key
+    // regardless of how many times it is retried or replayed.
+    const bagIdempotencyKey = generateBagIdempotencyKey(
+      config.stationId, session.session_id, bagNumber, qrCode,
     );
 
     const bag: FGBag = {
@@ -118,6 +127,7 @@ router.post('/add', (req: Request, res: Response) => {
       created_at: now,
       worker_code_1: worker_code_1 || null,
       worker_code_2: worker_code_2 || null,
+      idempotency_key: bagIdempotencyKey,   // Phase B
     };
 
     queries.insertBag(bag);

@@ -191,13 +191,24 @@ export class SyncEngine {
           note: bag.note,
           worker_code_1: bag.worker_code_1,
           worker_code_2: bag.worker_code_2,
+          idempotency_key: bag.idempotency_key ?? undefined,  // Phase B
         });
 
         this.queries.updateBagSynced(bag.bag_id, resp.line_id);
-        logger.info(
-          { bagId: bag.bag_id, qrCode: bag.qr_code, lineId: resp.line_id },
-          'Bag synced to Django',
-        );
+
+        if (resp.idempotent) {
+          // Phase B: Django confirmed this bag already existed (Phase C server support).
+          // Mark as synced — no new row was created.
+          logger.info(
+            { bagId: bag.bag_id, qrCode: bag.qr_code },
+            'Bag already on server (idempotent response) — marked synced, no duplicate created',
+          );
+        } else {
+          logger.info(
+            { bagId: bag.bag_id, qrCode: bag.qr_code, lineId: resp.line_id },
+            'Bag synced to Django',
+          );
+        }
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
 

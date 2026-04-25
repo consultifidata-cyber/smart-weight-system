@@ -198,6 +198,7 @@ export function makeBag(sessionId: string, overrides?: Partial<FGBag>): FGBag {
     created_at: new Date().toISOString(),
     worker_code_1: null,
     worker_code_2: null,
+    idempotency_key: null,  // Phase B: null = legacy bag; tests set via overrides
     ...overrides,
   };
 }

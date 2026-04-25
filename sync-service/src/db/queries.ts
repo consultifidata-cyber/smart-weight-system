@@ -68,6 +68,7 @@ export class Queries {
   private _getNextBagNumber!: Database.Statement;
   private _updateBagSynced!: Database.Statement;
   private _countBagsToday!: Database.Statement;
+  private _getBagByIdempotencyKey!: Database.Statement; // Phase B
 
   constructor(db: Database.Database) {
     this.db = db;
@@ -283,13 +284,19 @@ export class Queries {
     `);
 
     // ── Bag statements ───────────────────────────────────────────────────
+    // Phase B: idempotency_key added as 16th column.
     this._insertBag = this.db.prepare(`
       INSERT INTO fg_bag (
         bag_id, session_id, bag_number, item_id, pack_config_id,
         offer_id, actual_weight_gm, qr_code, batch_no, note,
-        line_id, synced, created_at, worker_code_1, worker_code_2
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        line_id, synced, created_at, worker_code_1, worker_code_2,
+        idempotency_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+
+    this._getBagByIdempotencyKey = this.db.prepare(
+      `SELECT * FROM fg_bag WHERE idempotency_key = ?`,
+    );
 
     this._getBagsBySession = this.db.prepare(
       `SELECT * FROM fg_bag WHERE session_id = ? ORDER BY bag_number ASC`
@@ -576,7 +583,14 @@ export class Queries {
       bag.actual_weight_gm, bag.qr_code, bag.batch_no, bag.note,
       bag.line_id, bag.synced, bag.created_at,
       bag.worker_code_1 ?? null, bag.worker_code_2 ?? null,
+      bag.idempotency_key ?? null,                             // Phase B
     );
+  }
+
+  /** Phase B: look up a bag by its idempotency key.
+   *  Used by the sync engine to avoid double-counting an idempotent server response. */
+  getBagByIdempotencyKey(key: string): FGBag | undefined {
+    return this._getBagByIdempotencyKey.get(key) as FGBag | undefined;
   }
 
   getBagsBySession(sessionId: string): FGBag[] {

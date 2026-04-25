@@ -143,10 +143,19 @@ export class DjangoClient {
     note?: string | null;
     worker_code_1?: string | null;
     worker_code_2?: string | null;
+    idempotency_key?: string | null;   // Phase B
   }): Promise<AddBagResponse> {
+    // Phase B: send Idempotency-Key header when key is available.
+    // Django will use this to return the cached response for retries instead of
+    // creating a new row.  Backward-compatible: Django ignores unknown headers.
+    const headers: Record<string, string> = { ...this.authHeaders };
+    if (data.idempotency_key) {
+      headers['Idempotency-Key'] = data.idempotency_key;
+    }
+
     const response = await fetch(`${this.serverUrl}/api/station/add-bag/`, {
       method: 'POST',
-      headers: this.authHeaders,
+      headers,
       body: JSON.stringify(data),
       signal: AbortSignal.timeout(this.timeoutMs),
     });

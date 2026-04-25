@@ -108,6 +108,11 @@ export interface FGBag {
   created_at: string;
   worker_code_1: string | null;
   worker_code_2: string | null;
+  /** Phase B: bag-level idempotency key.
+   *  Deterministic hash(station_id:session_id:bag_number:qr_code).
+   *  Null only for legacy rows created before migration 6 — the migration
+   *  backfills all existing rows so null should never appear in practice. */
+  idempotency_key: string | null;
 }
 
 export interface FGSessionWithBags extends FGSession {
