@@ -10,11 +10,12 @@
 #Requires -RunAsAdministrator
 
 $rules = @(
-    @{ Name='SWS-WebUI';     Port=3000;  Desc='Smart Weight System — Web UI'            },
-    @{ Name='SWS-WeightSvc'; Port=5000;  Desc='Smart Weight System — Weight Service'    },
-    @{ Name='SWS-PrintSvc';  Port=5001;  Desc='Smart Weight System — Print Service'     },
-    @{ Name='SWS-SyncSvc';   Port=5002;  Desc='Smart Weight System — Sync Service'      },
-    @{ Name='SWS-Launcher';  Port=5099;  Desc='Smart Weight System — Launcher Health'   }
+    @{ Name='SWS-WebUI';       Port=3000;  Desc='Smart Weight System — Web UI'                    },
+    @{ Name='SWS-WeightSvc';   Port=5000;  Desc='Smart Weight System — Weight Service'            },
+    @{ Name='SWS-PrintSvc';    Port=5001;  Desc='Smart Weight System — Print Service'             },
+    @{ Name='SWS-SyncSvc';     Port=5002;  Desc='Smart Weight System — Sync Service'              },
+    @{ Name='SWS-Launcher';    Port=5099;  Desc='Smart Weight System — Launcher Health'           },
+    @{ Name='SWS-DispatchSvc'; Port=4000;  Desc='Smart Weight System — Dispatch Service (LAN)'   }
 )
 
 foreach ($r in $rules) {

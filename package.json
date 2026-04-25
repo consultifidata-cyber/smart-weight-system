@@ -6,6 +6,7 @@
     "weight-service",
     "print-service",
     "sync-service",
-    "web-ui"
+    "web-ui",
+    "dispatch-service"
   ]
 }
