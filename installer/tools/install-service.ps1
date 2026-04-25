@@ -80,6 +80,22 @@ if (-not $NssmPath) {
 }
 Write-Host "[OK] NSSM     : $NssmPath" -ForegroundColor Green
 
+# Fix 2 — Verify NSSM is executable (catches AV quarantine before install starts)
+try {
+    $nssmVer = (& $NssmPath version 2>&1 | Select-Object -First 1)
+    Write-Host "[OK] NSSM ver : $nssmVer" -ForegroundColor Green
+} catch {
+    Write-Host '[ERROR] nssm.exe exists but cannot run — likely quarantined by antivirus.' -ForegroundColor Red
+    Write-Host ''
+    Write-Host '  TO FIX:' -ForegroundColor Yellow
+    Write-Host "  1. Open your antivirus / Windows Security"
+    Write-Host "  2. Add exclusion for: $NssmPath"
+    Write-Host "  3. Re-run this installer as Administrator"
+    Write-Host ''
+    Write-Host "  nssm.exe is a well-known Windows service manager (nssm.cc). It is safe."
+    exit 1
+}
+
 # ── Resolve Node.js ───────────────────────────────────────────────────────────
 if (-not $NodePath) {
     # 1. Bundled node-runtime (installer scenario)
@@ -107,6 +123,40 @@ if (-not (Test-Path $launcherScript)) {
     exit 1
 }
 Write-Host "[OK] Launcher : $launcherScript" -ForegroundColor Green
+
+# Fix 1 — Port conflict pre-check (before we touch anything)
+Write-Host '-- Checking port availability...'
+$portChecks = @(
+    @{ Port=3000;     Name='Web UI'          },
+    @{ Port=5000;     Name='Weight Service'  },
+    @{ Port=5001;     Name='Print Service'   },
+    @{ Port=5002;     Name='Sync Service'    },
+    @{ Port=$HealthPort; Name='Launcher Health' }
+)
+$portConflicts = @()
+foreach ($check in $portChecks) {
+    $conn = Get-NetTCPConnection -LocalPort $check.Port -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+    if ($conn) {
+        $pid  = $conn.OwningProcess
+        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $name = if ($proc) { $proc.Name } else { "PID $pid" }
+        # Skip if it's already our own service (upgrade scenario)
+        if ($name -notmatch 'node|SmartWeight') {
+            $portConflicts += "  Port $($check.Port) ($($check.Name)) is used by '$name' (PID $pid)"
+        }
+    }
+}
+if ($portConflicts.Count -gt 0) {
+    Write-Host '[ERROR] Port conflicts found — service will not start:' -ForegroundColor Red
+    $portConflicts | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+    Write-Host ''
+    Write-Host '  TO FIX: Stop the conflicting processes, then re-run the installer.' -ForegroundColor Yellow
+    Write-Host '  Run:  netstat -ano | findstr "3000 5000 5001 5002 5099"  to investigate.' -ForegroundColor Yellow
+    exit 1
+} else {
+    Write-Host '   All ports available.' -ForegroundColor Green
+}
 
 # ── Ensure logs directory ─────────────────────────────────────────────────────
 $logsDir = Join-Path $InstallDir 'logs'
@@ -225,7 +275,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ''
 Write-Host "-- Waiting for health endpoint (http://localhost:$HealthPort/health)..."
 
-$maxWaitSec = 30
+$maxWaitSec = 60   # Fix 3: 60s for first boot — slow laptops / AV scan delay
 $elapsed    = 0
 $healthy    = $false
 $health     = $null

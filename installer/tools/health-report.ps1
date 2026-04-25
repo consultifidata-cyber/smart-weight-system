@@ -135,7 +135,49 @@ if (Test-Path $nodeExe) {
     (& $nodeExe --version 2>&1) | Set-Content "$reportDir\node-version.txt" -Encoding UTF8
 }
 
-# ── 9. Zip and deliver to Desktop ─────────────────────────────────────────────
+# ── 9. Fix 4: Diagnose common crash patterns in logs ─────────────────────────
+Write-Host '  diagnosing known failure patterns...'
+$diagLines = @()
+
+$allLogs = Get-ChildItem $logsDir -Filter '*.log' -ErrorAction SilentlyContinue
+foreach ($lf in $allLogs) {
+    $content = Get-Content $lf.FullName -ErrorAction SilentlyContinue
+    if (-not $content) { continue }
+    $text = $content -join ' '
+
+    if ($text -match 'compiled against a different Node.js version|NODE_MODULE_VERSION|ABI') {
+        $diagLines += "[CRITICAL] $($lf.Name): Native module ABI mismatch. " +
+            "The .exe was built with a different Node.js version than the runtime. " +
+            "Re-download a fresh installer."
+    }
+    if ($text -match 'EADDRINUSE') {
+        $diagLines += "[CRITICAL] $($lf.Name): Port already in use. " +
+            "Another process is using a required port (3000/5000/5001/5002/5099). " +
+            "Stop it and restart the service."
+    }
+    if ($text -match 'EPERM|access is denied|Access Denied') {
+        $diagLines += "[WARN] $($lf.Name): Permission denied. " +
+            "Antivirus may be blocking file access. Check AV exclusions for $InstallDir."
+    }
+    if ($text -match 'Cannot find module|MODULE_NOT_FOUND') {
+        $diagLines += "[CRITICAL] $($lf.Name): Missing module. " +
+            "node_modules may be incomplete. Re-download a fresh installer."
+    }
+    if ($text -match 'spawn.*ENOENT') {
+        $diagLines += "[CRITICAL] $($lf.Name): node.exe or script not found. " +
+            "Check $InstallDir\node-runtime\node.exe exists."
+    }
+}
+
+if ($diagLines.Count -gt 0) {
+    Write-Host "  [!] $($diagLines.Count) known issue(s) detected:" -ForegroundColor Yellow
+    $diagLines | ForEach-Object { Write-Host "      $_" -ForegroundColor Yellow }
+    $diagLines | Set-Content "$reportDir\DIAGNOSTIC-ALERTS.txt" -Encoding UTF8
+} else {
+    'No known crash patterns detected in logs.' | Set-Content "$reportDir\DIAGNOSTIC-ALERTS.txt" -Encoding UTF8
+}
+
+# ── 10. Zip and deliver to Desktop ────────────────────────────────────────────
 Write-Host '  compressing...'
 Compress-Archive -Path "$reportDir\*" -DestinationPath $zipDest -Force
 
