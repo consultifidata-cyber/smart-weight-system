@@ -448,10 +448,10 @@ begin
   LblPrinterHint := TNewStaticText.Create(PageHardware);
   LblPrinterHint.Parent  := PageHardware.Surface;
   LblPrinterHint.Caption :=
-    'Label printer (TVS LP 46 NEO, TSC, SNBC, Zebra, etc.).'#13#10 +
-    'Connect via USB and power on — no driver installation required.'#13#10 +
-    'Shows as USB device (\\.\USBPRINxx) or USB-CDC [COM port].'#13#10 +
-    'Not listed? Connect USB cable, power on, then press Back and Next.';
+    'Connect the label printer USB cable and power it ON.'#13#10 +
+    'No driver installation required — it will appear automatically.'#13#10 +
+    'TVS LP 46 NEO shows as "\\.\USBPRIN01" OR as a COM port.'#13#10 +
+    'Not showing? Click RE-SCAN below (wait 5 seconds after powering on first).';
   LblPrinterHint.Left    := 0;
   LblPrinterHint.Top     := Y;
   LblPrinterHint.Width   := PageHardware.SurfaceWidth;
@@ -484,9 +484,11 @@ begin
   LblScaleHint := TNewStaticText.Create(PageHardware);
   LblScaleHint.Parent  := PageHardware.Surface;
   LblScaleHint.Caption :=
-    'USB-to-serial adapter (CH340, FTDI, CP210x, Prolific).'#13#10 +
-    'Connect scale USB cable and power on — driver auto-installed by Windows.'#13#10 +
-    'Not listed? Click RE-SCAN after connecting, or type COM port manually (e.g. COM3).';
+    'Connect the weighing scale USB cable and power on the scale.'#13#10 +
+    'It should appear here as a COM port (e.g. COM3, COM4).'#13#10 +
+    'Not showing? Open Device Manager. If you see "Unknown Device" under USB,'#13#10 +
+    'the CH340 driver is missing. Download it from: wch.cn/products/CH340.html'#13#10 +
+    'Install the driver, then click RE-SCAN below.';
   LblScaleHint.Left    := 0;
   LblScaleHint.Top     := Y;
   LblScaleHint.Width   := PageHardware.SurfaceWidth;
