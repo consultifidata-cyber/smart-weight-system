@@ -414,6 +414,7 @@ end;
 procedure InitializeWizard;
 var
   Y: Integer;
+  BtnRescan: TNewButton;   // Re-scan button — declared here (Pascal requires all vars at top)
 begin
   // ── Page 1: Hardware Detection ───────────────────────────────────────────
   PageHardware := CreateCustomPage(
@@ -495,7 +496,6 @@ begin
   // Placed below scale hint. Calls RunHardwareDetection() which re-runs the
   // PowerShell script and repopulates both dropdowns without leaving the page.
   Y := Y + 52;
-  var BtnRescan: TNewButton;
   BtnRescan := TNewButton.Create(PageHardware);
   BtnRescan.Parent  := PageHardware.Surface;
   BtnRescan.Caption := '↻  RE-SCAN HARDWARE  (plug in devices first, then click)';
