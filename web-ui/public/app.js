@@ -54,10 +54,14 @@ function weightApp() {
     // ── Phase F: double-click lock ──
     _printLockUntil: 0,
 
+    // ── Phase G: last master sync timestamp ──
+    lastMasterSyncAt: null,
+
     // ── Timers ──
     _weightPollId: null,
     _healthPollId: null,
     _autoResetId: null,
+    _syncStatusPollId: null,
 
     // ══════════════════════════════════════════════════════════════
     // Init / Destroy
@@ -87,6 +91,7 @@ function weightApp() {
     destroy() {
       clearInterval(this._weightPollId);
       clearInterval(this._healthPollId);
+      clearInterval(this._syncStatusPollId);
       clearTimeout(this._autoResetId);
     },
 
@@ -149,15 +154,56 @@ function weightApp() {
         });
     },
 
-    // ── Phase F: manual master-data refresh ──────────────────────
+    // ── Phase G: manual refresh — forces Django re-pull via sync-service ──
+    // Calls POST /sync/master-refresh which fetches latest workers + FG items
+    // from the live ERP before reloading the UI dropdowns.
     async refreshMasterData() {
       if (this.refreshing) return;
       this.refreshing = true;
+
+      try {
+        // Tell sync-service to pull fresh data from Django right now
+        var res = await this._fetchWithTimeout(
+          CONFIG.syncServiceUrl + '/sync/master-refresh',
+          { method: 'POST' },
+          12000  // longer timeout: Django network call
+        );
+        var data = res.ok ? await res.json() : null;
+
+        if (data && data.status === 'ok') {
+          this.lastMasterSyncAt = data.synced_at;
+          // Show counts briefly if available
+          if (data.workers_count !== undefined || data.products_count !== undefined) {
+            var msg = [];
+            if (data.workers_count  !== undefined) msg.push(data.workers_count  + ' workers');
+            if (data.products_count !== undefined) msg.push(data.products_count + ' products');
+            // non-blocking info only (no errorMessage — this is success)
+          }
+        }
+      } catch (err) {
+        // Network error — sync-service may be starting; fall through and reload cache
+      }
+
+      // Reload UI dropdowns from sync-service cache (now refreshed from Django)
       this.loadProducts();
       this.loadWorkers();
       await this.refreshTodaySummary();
+
       var self = this;
-      setTimeout(function () { self.refreshing = false; }, 2000);
+      setTimeout(function () { self.refreshing = false; }, 1500);
+    },
+
+    // ── Phase G: fetch last master sync timestamp from sync status ──────────
+    _fetchSyncStatus() {
+      var self = this;
+      this._fetchWithTimeout(CONFIG.syncServiceUrl + '/sync/status')
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.last_master_sync_at) {
+            self.lastMasterSyncAt = data.last_master_sync_at;
+          }
+        })
+        .catch(function () { /* best effort */ });
     },
 
     // ══════════════════════════════════════════════════════════════
@@ -183,8 +229,11 @@ function weightApp() {
       var self = this;
       this.pollWeight();
       this.pollHealth();
-      this._weightPollId = setInterval(function () { self.pollWeight(); }, CONFIG.weightPollMs);
-      this._healthPollId = setInterval(function () { self.pollHealth(); }, CONFIG.healthPollMs);
+      this._weightPollId    = setInterval(function () { self.pollWeight(); }, CONFIG.weightPollMs);
+      this._healthPollId    = setInterval(function () { self.pollHealth(); }, CONFIG.healthPollMs);
+      // Phase G: poll sync status every 2 minutes to keep lastMasterSyncAt fresh
+      this._syncStatusPollId = setInterval(function () { self._fetchSyncStatus(); }, 120000);
+      this._fetchSyncStatus();  // initial fetch on startup
     },
 
     pollWeight() {
@@ -534,6 +583,21 @@ function weightApp() {
       if (this.state === 'PRINT_FAILED') return false;
       if (this.state === 'PRINT_RETRYING') return true;
       return !this.canPrint;
+    },
+
+    // Phase G: human-readable "HH:MM" or "Never" for last master sync display
+    get lastMasterSyncDisplay() {
+      if (!this.lastMasterSyncAt) return 'Never';
+      try {
+        var d = new Date(this.lastMasterSyncAt);
+        return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      } catch (e) { return '?'; }
+    },
+
+    // Phase G: how many minutes ago was last master sync (for stale warning)
+    get masterSyncAgeMin() {
+      if (!this.lastMasterSyncAt) return null;
+      return Math.floor((Date.now() - new Date(this.lastMasterSyncAt).getTime()) / 60000);
     },
 
     get lastBagDisplay() {

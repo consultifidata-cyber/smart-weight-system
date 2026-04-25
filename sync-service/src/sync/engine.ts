@@ -586,10 +586,10 @@ export class SyncEngine {
     setTimeout(retry, retryDelayMs);
   }
 
-  async pullMasterData(): Promise<{ products: number; items: number }> {
+  async pullMasterData(): Promise<{ products: number; items: number; workers: number }> {
     if (!this.client.isConfigured) {
       logger.debug('Django server not configured, skipping master data pull');
-      return { products: 0, items: 0 };
+      return { products: 0, items: 0, workers: 0 };
     }
 
     logger.info('Pulling master data from Django');
@@ -601,7 +601,8 @@ export class SyncEngine {
     ]);
 
     let products = 0;
-    let items = 0;
+    let items    = 0;
+    let workers  = 0;   // Phase G
 
     if (configsResult.status === 'fulfilled') {
       this.queries.replacePackConfigs(configsResult.value);
@@ -619,6 +620,7 @@ export class SyncEngine {
 
     if (workersResult.status === 'fulfilled') {
       this.queries.replaceWorkerMasters(workersResult.value);
+      workers = workersResult.value.length;   // Phase G
     } else {
       logger.error({ error: workersResult.reason?.message || String(workersResult.reason) }, 'Failed to fetch worker masters');
     }
@@ -627,7 +629,7 @@ export class SyncEngine {
       this.queries.setMeta('last_master_sync_at', new Date().toISOString());
     }
 
-    logger.info({ products, items }, 'Master data pull complete');
-    return { products, items };
+    logger.info({ products, items, workers }, 'Master data pull complete');
+    return { products, items, workers };   // Phase G: include workers count
   }
 }

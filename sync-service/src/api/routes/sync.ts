@@ -52,10 +52,11 @@ router.post('/master-refresh', async (req: Request, res: Response) => {
   try {
     const result = await pullMasterData();
     res.json({
-      status: 'ok',
+      status:         'ok',
       products_count: result.products,
-      items_count: result.items,
-      synced_at: new Date().toISOString(),
+      items_count:    result.items,
+      workers_count:  result.workers,   // Phase G
+      synced_at:      new Date().toISOString(),
     });
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : String(err);

@@ -55,14 +55,26 @@
         <span class="bags-number" x-text="totalBagsToday"></span>
         <span class="bags-label">bags today</span>
       </div>
-      <!-- Phase F: manual master-data refresh -->
-      <button class="refresh-btn"
-        :disabled="refreshing"
-        @click="refreshMasterData()"
-        :class="{ spinning: refreshing }"
-        title="Refresh items and workers">
-        <span x-text="refreshing ? 'Refreshing…' : '⟳ Refresh'"></span>
-      </button>
+      <!-- Phase G: refresh + last-synced indicator -->
+      <div class="refresh-group">
+        <button class="refresh-btn"
+          :disabled="refreshing"
+          @click="refreshMasterData()"
+          :class="{ spinning: refreshing }"
+          title="Pull latest workers and products from server">
+          <span x-text="refreshing ? 'Refreshing…' : '⟳ Refresh'"></span>
+        </button>
+        <!-- Last synced: shows HH:MM, yellow if >10 min, red if never -->
+        <div class="sync-stamp"
+          :class="{
+            'sync-stale':  masterSyncAgeMin !== null && masterSyncAgeMin > 10,
+            'sync-never':  masterSyncAgeMin === null
+          }">
+          <span class="sync-label">Synced:</span>
+          <span x-text="lastMasterSyncDisplay"></span>
+          <span x-show="masterSyncAgeMin !== null && masterSyncAgeMin > 10" class="sync-warn">⚠</span>
+        </div>
+      </div>
     </div>
 
     <!-- Main area -->
