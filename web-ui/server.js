@@ -11,6 +11,14 @@ const PORT = process.env.WEB_UI_PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Serve dispatch SPA for any /dispatch/* path not matched by static files
+app.get('/dispatch', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dispatch', 'index.html'));
+});
+app.get('/dispatch/*', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dispatch', 'index.html'));
+});
+
 // ── Phase H: /ops/report — panic button triggers health-report.ps1 ──────────
 // Runs the diagnostic bundle script and returns the Desktop zip path.
 // Only works on Windows (production environment).

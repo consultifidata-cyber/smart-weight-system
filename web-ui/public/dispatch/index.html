@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Truck Loading — Dispatch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="dapp" x-data="dispatchApp()" x-init="init()" @unload.window="destroy()">
+
+  <!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+  <div class="toast" x-show="_toast" x-text="_toast" x-transition></div>
+
+  <!-- ── Server unreachable banner ──────────────────────────────────────────── -->
+  <div class="server-banner" x-show="!serverOk" x-cloak>
+    ⚠  Cannot reach dispatch server at <span x-text="API.replace('/api/dispatch','')"></span>
+    — Check Laptop A is running.
+    <button @click="retryServer()">↻ Retry</button>
+  </div>
+
+  <!-- ── Top nav ────────────────────────────────────────────────────────────── -->
+  <div class="top-nav">
+    <div class="top-nav-title">
+      <span x-show="page === 'list'">📦 TRUCK LOADING</span>
+      <span x-show="page === 'new'">📋 NEW DISPATCH</span>
+      <span x-show="page === 'scan'">🔍 SCANNING</span>
+    </div>
+    <div class="top-nav-links">
+      <a href="/" class="nav-link">⚖ Weight Station</a>
+      <span class="nav-link nav-active">📦 Dispatch</span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       SCREEN 1 — DISPATCH LIST
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <div class="screen" x-show="page === 'list'" x-cloak>
+
+    <div class="list-header">
+      <div>
+        <h2>Today's Dispatches</h2>
+        <div class="list-count" x-text="docs.length + ' records'"></div>
+      </div>
+      <button class="btn-primary" @click="goNew()">+ New Dispatch</button>
+    </div>
+
+    <!-- Loading -->
+    <div class="empty-state" x-show="docsLoading && docs.length === 0">Loading…</div>
+
+    <!-- Empty -->
+    <div class="empty-state" x-show="!docsLoading && docs.length === 0 && serverOk">
+      No dispatches yet today. Click <strong>+ New Dispatch</strong> to start.
+    </div>
+
+    <!-- Table -->
+    <div class="dispatch-table-wrap" x-show="docs.length > 0">
+      <table class="dispatch-table">
+        <thead>
+          <tr>
+            <th>Doc No</th>
+            <th>Truck</th>
+            <th>Customer</th>
+            <th>Bags</th>
+            <th>Weight</th>
+            <th>Status</th>
+            <th>Sync</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="doc in docs" :key="doc.doc_id">
+            <tr class="dispatch-row"
+                :class="{ 'row-draft': doc.status==='DRAFT', 'row-closed': doc.status==='CLOSED', 'row-clickable': doc.status==='DRAFT' }"
+                @click="openDoc(doc)">
+              <td class="doc-no" x-text="doc.doc_no"></td>
+              <td x-text="doc.truck_no"></td>
+              <td x-text="doc.customer_name"></td>
+              <td class="num" x-text="doc.total_bags"></td>
+              <td class="num" x-text="formatWeight(doc.total_weight_gm)"></td>
+              <td>
+                <span class="badge" :class="statusBadgeClass(doc.status)" x-text="doc.status"></span>
+              </td>
+              <td>
+                <span class="sync-badge" :class="syncBadgeClass(doc.sync_status)" x-text="doc.sync_status"></span>
+              </td>
+              <td x-text="formatTime(doc.created_at)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       SCREEN 2 — NEW DISPATCH FORM
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <div class="screen screen-form" x-show="page === 'new'" x-cloak>
+
+    <div class="form-header">
+      <button class="btn-back" @click="page = 'list'">← Back</button>
+      <h2>New Truck Loading</h2>
+    </div>
+
+    <div class="form-grid">
+
+      <!-- Date + Shift -->
+      <div class="field">
+        <label>Date</label>
+        <input type="date" x-model="form.entry_date" class="input">
+      </div>
+      <div class="field">
+        <label>Shift</label>
+        <select x-model="form.shift" class="input">
+          <option value="A">A (06:00–14:00)</option>
+          <option value="B">B (14:00–22:00)</option>
+          <option value="C">C (22:00–06:00)</option>
+        </select>
+      </div>
+
+      <!-- Truck 1 -->
+      <div class="field full">
+        <label>Truck No (Truck 1) <span class="hint">e.g. MH-12-AB-1234</span></label>
+        <input type="text" x-model="form.truck_no"
+          @input="form.truck_no = $event.target.value.toUpperCase()"
+          placeholder="MH-12-AB-1234" class="input input-lg">
+      </div>
+
+      <!-- Customer (Truck 1) — searchable dropdown -->
+      <div class="field full" style="position:relative;">
+        <label>Customer</label>
+        <input type="text" x-model="partySearch"
+          @focus="partyDropdownOpen = true"
+          @input="partyDropdownOpen = true; form.customer_id = null; form.customer_name = $event.target.value"
+          @blur="setTimeout(() => partyDropdownOpen = false, 180)"
+          :placeholder="parties.length === 0 ? 'No customers synced — type name manually' : 'Search customer…'"
+          class="input">
+        <div class="party-dropdown" x-show="partyDropdownOpen && (filteredParties.length > 0 || partySearch.length > 1)" x-cloak>
+          <template x-for="p in filteredParties" :key="p.party_id">
+            <div class="party-item" @mousedown.prevent="selectParty(p, 1)">
+              <span x-text="p.party_name"></span>
+              <span class="party-code" x-text="p.party_code"></span>
+            </div>
+          </template>
+          <div class="party-item party-manual" x-show="partySearch.length > 1"
+               @mousedown.prevent="useManualName(1)">
+            Use "<span x-text="partySearch"></span>" as new customer
+          </div>
+        </div>
+      </div>
+
+      <!-- Location -->
+      <div class="field full">
+        <label>Source Location <span class="hint">(warehouse / godown)</span></label>
+        <input type="text" x-model="form.location" placeholder="e.g. Main Warehouse" class="input">
+      </div>
+
+      <!-- Delay reason -->
+      <div class="field full">
+        <label>Delay Reason <span class="hint">(optional)</span></label>
+        <textarea x-model="form.delay_reason" rows="2" placeholder="If dispatch is delayed from schedule…" class="input"></textarea>
+      </div>
+
+      <!-- Truck 2 fields (shown always but labelled as optional unless two-lane) -->
+      <div class="field full section-divider">
+        <label class="section-label">Truck 2 (optional — for two-lane scanning)</label>
+      </div>
+      <div class="field full">
+        <label>Truck No 2</label>
+        <input type="text" x-model="form.truck_no_2"
+          @input="form.truck_no_2 = $event.target.value.toUpperCase()"
+          placeholder="Leave blank for single truck" class="input">
+      </div>
+      <div class="field full" x-show="form.truck_no_2.trim()" x-cloak>
+        <label>Customer for Truck 2</label>
+        <input type="text" x-model="form.customer_name_2"
+          placeholder="Customer name for truck 2" class="input">
+      </div>
+
+    </div><!-- /.form-grid -->
+
+    <!-- Submit buttons -->
+    <div class="form-actions">
+      <button class="btn-primary btn-xl" :disabled="formSubmitting"
+        @click="startDispatch(false)">
+        <span x-text="formSubmitting ? 'Creating…' : '→ Start Single Truck'"></span>
+      </button>
+      <button class="btn-secondary btn-xl" :disabled="formSubmitting || !form.truck_no_2.trim()"
+        @click="startDispatch(true)"
+        :title="form.truck_no_2.trim() ? '' : 'Fill Truck No 2 above first'">
+        → Start Two Trucks
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+       SCREEN 3 — SCANNING (1 or 2 lanes)
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <div class="screen screen-scan" x-show="page === 'scan'" x-cloak>
+
+    <!-- Scan screen header -->
+    <div class="scan-header">
+      <button class="btn-back" @click="goBackToList()">← Dispatches</button>
+      <div class="scan-header-center">
+        <span x-show="pendingRetryCount > 0" class="retry-warning">
+          ↻ <span x-text="pendingRetryCount"></span> scan(s) pending retry…
+        </span>
+      </div>
+      <div class="lane-count-badge" x-text="lanes.length + ' truck' + (lanes.length > 1 ? 's' : '')"></div>
+    </div>
+
+    <!-- Lanes -->
+    <div class="lanes-container" :class="lanes.length === 2 ? 'two-lanes' : 'one-lane'">
+      <template x-for="(lane, laneIdx) in lanes" :key="laneIdx">
+        <div class="lane" :class="{ 'lane-active': activeLane === laneIdx, 'lane-closing': lane.closing }">
+
+          <!-- Lane header -->
+          <div class="lane-header">
+            <div class="lane-truck">
+              <span class="lane-truck-no" x-text="lane.doc.truck_no"></span>
+              <span class="lane-customer" x-text="lane.doc.customer_name"></span>
+            </div>
+            <div class="lane-stats">
+              <span class="lane-stat-bags">
+                <strong x-text="lane.doc.total_bags || 0"></strong> bags
+              </span>
+              <span class="lane-stat-sep">|</span>
+              <span class="lane-stat-weight" x-text="formatWeight(lane.doc.total_weight_gm)"></span>
+            </div>
+          </div>
+
+          <!-- Scan input area -->
+          <div class="scan-area" @click="tapToFocus(laneIdx)">
+            <input
+              :id="'scan-input-' + laneIdx"
+              type="text"
+              x-model="lane.inputValue"
+              @keydown="onScanKey($event, laneIdx)"
+              @focus="activeLane = laneIdx"
+              class="scan-input"
+              :class="{ 'scan-input-active': activeLane === laneIdx }"
+              placeholder="SCAN HERE ↑"
+              autocomplete="off" autocorrect="off" spellcheck="false">
+            <!-- Inactive overlay -->
+            <div class="scan-inactive-overlay" x-show="activeLane !== laneIdx">
+              TAP TO FOCUS SCANNER
+            </div>
+          </div>
+
+          <!-- Recent scans -->
+          <div class="scans-list">
+            <template x-for="(s, idx) in lane.scans.slice(0, 20)" :key="idx">
+              <div class="scan-item" :class="'scan-' + s.color">
+                <span class="scan-icon" x-text="scanResultIcon(s.color)"></span>
+                <span class="scan-qr" x-text="s.qr_code"></span>
+                <span class="scan-detail" x-show="s.pack_name" x-text="s.pack_name"></span>
+                <span class="scan-weight" x-show="s.actual_weight_gm" x-text="formatWeight(s.actual_weight_gm)"></span>
+                <span class="scan-msg" x-show="s.color === 'red' || s.color === 'yellow' || s.color === 'retry'" x-text="s.message"></span>
+                <span class="scan-time" x-text="formatTime(s.scanned_at)"></span>
+              </div>
+            </template>
+            <div class="scans-empty" x-show="lane.scans.length === 0">
+              No scans yet — point scanner and scan a bag
+            </div>
+          </div>
+
+          <!-- SKU Summary -->
+          <div class="sku-summary" x-show="lane.skuSummary.length > 0">
+            <div class="sku-title">By Product:</div>
+            <template x-for="s in lane.skuSummary" :key="s.pack_name">
+              <div class="sku-row">
+                <span x-text="s.pack_name || 'Unknown'"></span>
+                <span>×<strong x-text="s.bag_count"></strong></span>
+                <span class="sku-weight" x-text="formatWeight(s.total_weight_gm)"></span>
+              </div>
+            </template>
+          </div>
+
+          <!-- Close truck button / confirm -->
+          <div class="close-section" x-show="lane.doc.status === 'DRAFT'">
+            <div x-show="!lane.closingConfirm">
+              <button class="btn-close-truck" @click="confirmClose(laneIdx)"
+                :disabled="lane.closing || lane.doc.total_bags === 0"
+                :title="lane.doc.total_bags === 0 ? 'Scan at least one bag first' : ''">
+                🔒 CLOSE TRUCK
+              </button>
+            </div>
+            <div class="close-confirm" x-show="lane.closingConfirm" x-cloak>
+              <div class="close-confirm-text">
+                Close <strong x-text="lane.doc.doc_no"></strong> with
+                <strong x-text="lane.doc.total_bags"></strong> bags /
+                <strong x-text="formatWeight(lane.doc.total_weight_gm)"></strong>?
+                This cannot be undone.
+              </div>
+              <div class="close-confirm-btns">
+                <button class="btn-confirm-yes" @click="closeDispatch(laneIdx)" :disabled="lane.closing">
+                  <span x-text="lane.closing ? 'Closing…' : '✓ Confirm Close'"></span>
+                </button>
+                <button class="btn-confirm-no" @click="cancelClose(laneIdx)">Cancel</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="closed-badge" x-show="lane.doc.status === 'CLOSED'">
+            ✓ CLOSED — Queued for sync
+          </div>
+
+        </div><!-- /.lane -->
+      </template>
+    </div><!-- /.lanes-container -->
+
+  </div><!-- /.screen-scan -->
+
+</div><!-- /.dapp -->
+
+<script src="../lib/alpine.min.js" defer></script>
+<script src="app.js"></script>
+</body>
+</html>

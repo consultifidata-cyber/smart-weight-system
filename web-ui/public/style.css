@@ -124,6 +124,20 @@ html, body {
 }
 .training-toggle.active { background: #fef9c3; border-color: #ca8a04; color: #ca8a04; }
 
+.dispatch-nav-link {
+  padding: 5px 10px;
+  font-size: .82rem;
+  font-weight: 700;
+  background: #eff6ff;
+  border: 2px solid var(--blue);
+  border-radius: 8px;
+  color: var(--blue);
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.dispatch-nav-link:hover { background: #dbeafe; }
+
 .report-btn {
   width: 30px; height: 30px;
   border-radius: 7px;
