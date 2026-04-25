@@ -26,6 +26,16 @@ function weightApp() {
     selectedWorker1: '',
     selectedWorker2: '',
 
+    // ── Worker grid (Phase UI) ─────────────────────────────────────────────
+    // pinnedWorkerCodes: ordered array of up to 15 worker codes shown as BIG buttons.
+    // Positions are stable — workers learn "my button is always in slot 4".
+    // When a non-pinned worker is selected, the least-recently-used pinned worker
+    // is evicted and the new one takes that exact slot (position preserved).
+    PINNED_LIMIT:     15,
+    pinnedWorkerCodes: [],   // max 15 codes, ORDER IS STABLE
+    workerLastUsed:   {},    // { code: timestamp } — for eviction decisions
+    workerPanelOpen:  false, // worker info/lookup panel
+
     // ── Today's bag count ──
     totalBagsToday: 0,
     bagsByProduct: [],
@@ -105,6 +115,14 @@ function weightApp() {
         if (w1) this.selectedWorker1 = w1;
         var w2 = localStorage.getItem('selectedWorker2');
         if (w2) this.selectedWorker2 = w2;
+      } catch (e) { /* ignore */ }
+
+      // Restore pinned worker slots and last-used timestamps
+      try {
+        var pc = localStorage.getItem('pinnedWorkerCodes');
+        if (pc) this.pinnedWorkerCodes = JSON.parse(pc);
+        var lu = localStorage.getItem('workerLastUsed');
+        if (lu) this.workerLastUsed = JSON.parse(lu);
       } catch (e) { /* ignore */ }
 
       // Phase H: restore training mode preference
@@ -818,7 +836,7 @@ function weightApp() {
         bag_number: bagNumber || null,
         time:       new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
       });
-      this.recentProducts = filtered.slice(0, 8);
+      this.recentProducts = filtered.slice(0, 10);
       try { localStorage.setItem('recent_products', JSON.stringify(this.recentProducts)); } catch (e) { /* ignore */ }
     },
 
@@ -844,6 +862,69 @@ function weightApp() {
 
     onWorker2Change() {
       try { localStorage.setItem('selectedWorker2', this.selectedWorker2); } catch (e) { /* ignore */ }
+    },
+
+    // ── Worker grid methods ────────────────────────────────────────────────
+
+    /** Pinned worker objects in stable slot order (shown as big buttons). */
+    get pinnedWorkerObjects() {
+      return this.pinnedWorkerCodes
+        .map(function(code) { return this.workers.find(function(w) { return w.worker_code === code; }); }.bind(this))
+        .filter(Boolean);
+    },
+
+    /** Workers not in the pinned set (shown as small buttons). */
+    get otherWorkerObjects() {
+      var pinned = new Set(this.pinnedWorkerCodes);
+      return this.workers.filter(function(w) { return !pinned.has(w.worker_code); });
+    },
+
+    /**
+     * Select a worker from the grid.
+     * If the worker is outside the pinned 15, they replace the least-recently-used
+     * pinned worker AT THE SAME SLOT so other workers' button positions don't shift.
+     */
+    selectWorkerCode(code, isWorker2) {
+      if (isWorker2) {
+        this.selectedWorker2 = (this.selectedWorker2 === code) ? '' : code;
+        try { localStorage.setItem('selectedWorker2', this.selectedWorker2); } catch (e) {}
+        return;
+      }
+
+      // Toggle off if tapping the already-selected worker
+      if (this.selectedWorker1 === code) {
+        this.selectedWorker1 = '';
+        try { localStorage.setItem('selectedWorker1', ''); } catch (e) {}
+        return;
+      }
+
+      this.selectedWorker1 = code;
+      var now = Date.now();
+      this.workerLastUsed[code] = now;
+
+      // Keep position stable: only evict/add when new worker is outside pinned set
+      if (!this.pinnedWorkerCodes.includes(code)) {
+        if (this.pinnedWorkerCodes.length < this.PINNED_LIMIT) {
+          // Empty slot available — just append
+          this.pinnedWorkerCodes.push(code);
+        } else {
+          // Find the pinned worker with the oldest last-used timestamp
+          var oldestCode = null;
+          var oldestTime = Infinity;
+          var self = this;
+          this.pinnedWorkerCodes.forEach(function(c) {
+            var t = self.workerLastUsed[c] || 0;
+            if (t < oldestTime) { oldestTime = t; oldestCode = c; }
+          });
+          // Replace at SAME SLOT so other positions don't shift
+          var idx = this.pinnedWorkerCodes.indexOf(oldestCode);
+          if (idx >= 0) this.pinnedWorkerCodes[idx] = code;
+        }
+      }
+
+      try { localStorage.setItem('pinnedWorkerCodes', JSON.stringify(this.pinnedWorkerCodes)); } catch (e) {}
+      try { localStorage.setItem('workerLastUsed', JSON.stringify(this.workerLastUsed)); } catch (e) {}
+      try { localStorage.setItem('selectedWorker1', code); } catch (e) {}
     },
 
     _fetchWithTimeout(url, options, timeoutMs) {
