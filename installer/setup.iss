@@ -397,6 +397,19 @@ begin
     ' -StationId '''         + EscPS(StationId)    + '''';
 end;
 
+// ── Re-scan button handler ────────────────────────────────────────────────────
+// Called when technician clicks RE-SCAN after plugging in hardware.
+// Re-runs the PowerShell detection script and repopulates both dropdowns.
+procedure OnRescanClick(Sender: TObject);
+begin
+  WizardForm.NextButton.Enabled := False;
+  try
+    RunHardwareDetection();
+  finally
+    WizardForm.NextButton.Enabled := True;
+  end;
+end;
+
 // ── Create all custom wizard pages ───────────────────────────────────────────
 procedure InitializeWizard;
 var
@@ -472,11 +485,25 @@ begin
   LblScaleHint.Caption :=
     'USB-to-serial adapter (CH340, FTDI, CP210x, Prolific).'#13#10 +
     'Connect scale USB cable and power on — driver auto-installed by Windows.'#13#10 +
-    'Not listed? Disconnect and reconnect USB cable, then press Back and Next.';
+    'Not listed? Click RE-SCAN after connecting, or type COM port manually (e.g. COM3).';
   LblScaleHint.Left    := 0;
   LblScaleHint.Top     := Y;
   LblScaleHint.Width   := PageHardware.SurfaceWidth;
   LblScaleHint.AutoSize := True;
+
+  // ── RE-SCAN button — lets technician re-detect after connecting hardware ───
+  // Placed below scale hint. Calls RunHardwareDetection() which re-runs the
+  // PowerShell script and repopulates both dropdowns without leaving the page.
+  Y := Y + 52;
+  var BtnRescan: TNewButton;
+  BtnRescan := TNewButton.Create(PageHardware);
+  BtnRescan.Parent  := PageHardware.Surface;
+  BtnRescan.Caption := '↻  RE-SCAN HARDWARE  (plug in devices first, then click)';
+  BtnRescan.Left    := 0;
+  BtnRescan.Top     := Y;
+  BtnRescan.Width   := PageHardware.SurfaceWidth;
+  BtnRescan.Height  := 36;
+  BtnRescan.OnClick := @OnRescanClick;
 
   // ── Page 2: Server Configuration ─────────────────────────────────────────
   PageServer := CreateInputQueryPage(

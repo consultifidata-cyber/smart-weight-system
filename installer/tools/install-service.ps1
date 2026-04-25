@@ -60,6 +60,48 @@ Write-Host "  ServiceName : $ServiceName"
 Write-Host "  HealthPort  : $HealthPort"
 Write-Host ''
 
+# ── CLEAN SLATE: kill anything holding our ports before we begin ──────────────
+# Handles the case where a previous install left stale processes running,
+# preventing new service registration. Kills: old service, node.exe holding
+# our ports, PM2, and any process on 3000/5000/5001/5002/5099.
+Write-Host '-- Clearing stale processes (clean-slate install)...'
+
+# 1. Stop old SmartWeightSystem service if running
+$oldSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($oldSvc -and $oldSvc.Status -ne 'Stopped') {
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    Write-Host "   Stopped old $ServiceName service" -ForegroundColor Yellow
+}
+
+# 2. Kill any node.exe running from the install directory (stale launcher/services)
+Get-Process -Name 'node' -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+        $cmdline = (Get-WmiObject Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine
+        if ($cmdline -and ($cmdline -like "*$InstallDir*" -or $cmdline -like '*launcher.js*' -or $cmdline -like '*sync-service*' -or $cmdline -like '*weight-service*' -or $cmdline -like '*print-service*')) {
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "   Killed stale node.exe (PID $($_.Id))" -ForegroundColor Yellow
+        }
+    } catch {}
+}
+
+# 3. Kill any process holding our ports (e.g., old PM2, manual node starts)
+$ourPorts = @(3000, 5000, 5001, 5002, $HealthPort)
+foreach ($port in $ourPorts) {
+    $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    foreach ($conn in $conns) {
+        $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        if ($proc -and $proc.Name -ne 'System' -and $proc.Name -ne 'svchost') {
+            Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+            Write-Host "   Killed $($proc.Name) (PID $($conn.OwningProcess)) holding port $port" -ForegroundColor Yellow
+        }
+    }
+}
+
+Start-Sleep -Seconds 2
+Write-Host '   Clean-slate complete.' -ForegroundColor Green
+Write-Host ''
+
 # ── Resolve NSSM ─────────────────────────────────────────────────────────────
 if (-not $NssmPath) {
     # 1. Next to this script

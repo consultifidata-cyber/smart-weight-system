@@ -76,17 +76,41 @@ function Test-WriteAccess([string]$Path) {
     }
 }
 
-# ── Step 1: Probe USB printer device paths (\\.\USBPRINxx) ───────────────────
-Write-Host 'Detecting USB printer paths...'
+# ── Step 1: Probe USB printer device paths with RETRY ────────────────────────
+# Windows takes 2-10 seconds to enumerate USB devices after plug-in.
+# We retry 3 times with a 3-second gap to catch recently-plugged printers.
+
+Write-Host 'Detecting USB printer paths (up to 3 attempts, 3s apart)...'
 $writablePaths = @()
-for ($i = 1; $i -le 20; $i++) {
-    $pad  = $i.ToString('00')
-    $path = "\\.\USBPRIN$pad"
-    if (Test-WriteAccess $path) {
-        $writablePaths += $path
-        Write-Host "  Found: $path"
-        if ($i -gt 5 -and $writablePaths.Count -eq 0) { break }  # early exit
+$maxPrinterAttempts = 3
+
+for ($attempt = 1; $attempt -le $maxPrinterAttempts; $attempt++) {
+    $found = @()
+    for ($i = 1; $i -le 20; $i++) {
+        $pad  = $i.ToString('00')
+        $path = "\\.\USBPRIN$pad"
+        if (Test-WriteAccess $path) {
+            $found += $path
+            Write-Host "  Found: $path"
+        }
+        if ($i -gt 5 -and $found.Count -eq 0) { break }
     }
+
+    if ($found.Count -gt 0) {
+        $writablePaths = $found
+        break
+    }
+
+    if ($attempt -lt $maxPrinterAttempts) {
+        Write-Host "  No USBPRIN paths found (attempt $attempt/$maxPrinterAttempts) - waiting 3s for USB enumeration..."
+        Start-Sleep -Seconds 3
+    }
+}
+
+if ($writablePaths.Count -eq 0) {
+    Write-Host '  NOTE: No USB Printer Class paths found after retries.'
+    Write-Host '        This is normal if the printer uses USB-CDC mode (it will appear as a COM port below).'
+    Write-Host '        Ensure the printer is: (1) connected via USB  (2) powered ON  (3) ready lamp is lit'
 }
 
 # ── Step 2: Query PnP USB devices for VID/PID/name (parallel with path probe) ─
@@ -208,17 +232,36 @@ if ($printerLines.Count -gt 0) {
 } else {
     '' | Set-Content $printerFile -Encoding UTF8
 }
-Write-Host "Printers written: $($printerLines.Count) → $printerFile"
+Write-Host "Printers written: $($printerLines.Count) -> $printerFile"
 
-# ── Step 4: Build scale (COM port) list ──────────────────────────────────────
-Write-Host 'Detecting USB-serial COM ports...'
+# ── Step 4: Build scale (COM port) list WITH RETRY ───────────────────────────
+# CH340/FTDI drivers can take a few seconds to appear after USB plug.
+Write-Host 'Detecting USB-serial COM ports (up to 3 attempts)...'
 $scaleLines    = @()
-$scaleVidLines = @()  # HIGH confidence first
-$scaleLowLines = @()  # LOW confidence last
+$scaleVidLines = @()
+$scaleLowLines = @()
+
+$comDevices = @()
+for ($scaleAttempt = 1; $scaleAttempt -le 3; $scaleAttempt++) {
+    $found = @(
+        Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object { ($_.Name -match 'COM\d' -or $_.Description -match 'COM\d') -and $_.InstanceId -match 'USB\\VID_' }
+    )
+    if ($found.Count -gt 0) { $comDevices = $found; break }
+    if ($scaleAttempt -lt 3) {
+        Write-Host "  No USB-serial ports found (attempt $scaleAttempt/3) - waiting 3s..."
+        Start-Sleep -Seconds 3
+    }
+}
+
+if ($comDevices.Count -eq 0) {
+    Write-Host '  NOTE: No USB-serial adapter detected.'
+    Write-Host '        If scale is connected, ensure the USB-serial driver is installed (CH340/FTDI).'
+    Write-Host '        You can type the COM port manually in the installer wizard.'
+}
 
 $comDevices = @(
-    Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match 'COM\d' -or $_.Description -match 'COM\d' } |
+    $comDevices |
     ForEach-Object {
         $comMatch = [regex]::Match("$($_.Name) $($_.Description)", '(COM\d+)')
         if (-not $comMatch.Success) { return }
@@ -275,6 +318,6 @@ if ($scaleLines.Count -gt 0) {
 } else {
     '' | Set-Content $scaleFile -Encoding UTF8
 }
-Write-Host "Scales written: $($scaleLines.Count) → $scaleFile"
+Write-Host "Scales written: $($scaleLines.Count) -> $scaleFile"
 
 Write-Host 'Detection complete.'
