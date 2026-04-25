@@ -10,14 +10,14 @@ function weightApp() {
     unit: 'kg',
     stable: false,
     stableWeight: null,
-    weightStatus: 'unknown', // ok | disconnected | no_data | unknown
+    weightStatus: 'unknown',
 
     // ── Connectivity ──
     printerConnected: false,
     syncConnected: false,
     weightServiceReachable: false,
 
-    // ── Products (FGPackConfig list from sync-service) ──
+    // ── Products ──
     products: [],
     selectedPackId: '',
 
@@ -28,24 +28,31 @@ function weightApp() {
 
     // ── Today's bag count ──
     totalBagsToday: 0,
-    bagsByProduct: [], // [{ pack_config_id, pack_name, count }]
+    bagsByProduct: [],
 
-    // ── Last bag (for label display + reprint) ──
-    lastBag: null, // { qr_code, bag_number, pack_name, weight_gm, weight_kg, line1 }
+    // ── Last bag (for reprint + prominent "last printed" display) ──
+    lastBag: null,
 
-    // ── Recent products (last 5 unique, most-recent first) ──
-    recentProducts: [], // [{ pack_id, name }, ...]
+    // ── Recent products (left panel) — now stores richer data ──
+    recentProducts: [],
 
-    // ── UI ──
+    // ── UI state ──
     errorMessage: null,
+    errorModal: { show: false, title: '', body: '', showRetry: false },
 
-    // ── Counter (line1 on label) ──
+    // ── Refresh state ──
+    refreshing: false,
+
+    // ── Counter ──
     counter: null,
 
     // ── Print retry state ──
     printAttempt: 0,
     printMaxAttempts: 0,
     printResetting: false,
+
+    // ── Phase F: double-click lock ──
+    _printLockUntil: 0,
 
     // ── Timers ──
     _weightPollId: null,
@@ -84,7 +91,7 @@ function weightApp() {
     },
 
     // ══════════════════════════════════════════════════════════════
-    // Product loading (offline-first with localStorage cache)
+    // Product / worker loading (offline-first with localStorage cache)
     // ══════════════════════════════════════════════════════════════
 
     loadProducts() {
@@ -104,17 +111,11 @@ function weightApp() {
             var cached = localStorage.getItem('products');
             if (cached) {
               var parsed = JSON.parse(cached);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                self.products = parsed;
-              }
+              if (Array.isArray(parsed) && parsed.length > 0) self.products = parsed;
             }
           } catch (e) { /* ignore */ }
         });
     },
-
-    // ══════════════════════════════════════════════════════════════
-    // Worker loading (offline-first with localStorage cache)
-    // ══════════════════════════════════════════════════════════════
 
     _workerRetryCount: 0,
     _workerRetryId: null,
@@ -138,12 +139,9 @@ function weightApp() {
             var cached = localStorage.getItem('workers');
             if (cached) {
               var parsed = JSON.parse(cached);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                self.workers = parsed;
-              }
+              if (Array.isArray(parsed) && parsed.length > 0) self.workers = parsed;
             }
           } catch (e) { /* ignore */ }
-          // Retry if still no workers (max 10 retries, 15s apart)
           if (self.workers.length === 0 && self._workerRetryCount < 10) {
             self._workerRetryCount++;
             self._workerRetryId = setTimeout(function () { self.loadWorkers(); }, 15000);
@@ -151,13 +149,24 @@ function weightApp() {
         });
     },
 
+    // ── Phase F: manual master-data refresh ──────────────────────
+    async refreshMasterData() {
+      if (this.refreshing) return;
+      this.refreshing = true;
+      this.loadProducts();
+      this.loadWorkers();
+      await this.refreshTodaySummary();
+      var self = this;
+      setTimeout(function () { self.refreshing = false; }, 2000);
+    },
+
     // ══════════════════════════════════════════════════════════════
-    // Today's summary (bag counts per product)
+    // Today's summary
     // ══════════════════════════════════════════════════════════════
 
     refreshTodaySummary() {
       var self = this;
-      this._fetchWithTimeout(CONFIG.syncServiceUrl + '/bags/today')
+      return this._fetchWithTimeout(CONFIG.syncServiceUrl + '/bags/today')
         .then(function (res) { return res.json(); })
         .then(function (data) {
           self.totalBagsToday = data.total_bags || 0;
@@ -219,15 +228,20 @@ function weightApp() {
     // ══════════════════════════════════════════════════════════════
 
     async doPrint() {
+      // Phase F: hard double-click lock — ignore any tap within 2 seconds of last tap
+      var now = Date.now();
+      if (now < this._printLockUntil) return;
+      this._printLockUntil = now + (CONFIG.printLockMs || 2000);
+
       if (!this.canPrint) return;
 
       this.state = 'PRINTING';
       this.errorMessage = null;
+      this.errorModal.show = false;
 
       var weightKg = this.stableWeight || this.weight;
       var weightGm = Math.round(weightKg * 1000);
 
-      // Step 1: Add bag to sync-service (auto-creates session internally)
       try {
         var addRes = await this._fetchWithTimeout(
           CONFIG.syncServiceUrl + '/bags/add',
@@ -249,7 +263,6 @@ function weightApp() {
           throw new Error(bagData.error || 'Failed to add bag');
         }
 
-        // Generate line1 counter
         var line1 = this.counter.nextLine1();
 
         this.lastBag = {
@@ -259,24 +272,21 @@ function weightApp() {
           weight_gm: weightGm,
           weight_kg: weightKg,
           line1: line1,
+          printed_at: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
         };
         this.totalBagsToday = bagData.total_bags_today;
 
-        // Update recent products panel
-        this._updateRecentProducts(Number(this.selectedPackId), bagData.pack_name);
-
-        // Update per-product count in local summary
+        this._updateRecentProducts(Number(this.selectedPackId), bagData.pack_name, weightKg, bagData.bag_number);
         this._updateLocalProductCount(bagData.pack_name);
 
       } catch (err) {
-        this.errorMessage = 'Add bag failed: ' + (err.message || 'Unknown error');
+        // Phase F: show full-screen error modal for add-bag failure
+        this._showErrorModal('SYNC ERROR', 'Could not save bag to system.\n\n' + (err.message || 'Network error'), false);
         this.state = 'IDLE';
-        var self2 = this;
-        setTimeout(function () { self2.errorMessage = null; }, 5000);
+        this._playBeep('error');
         return;
       }
 
-      // Step 2: Send label to printer (with retry)
       await this._printLabel(weightKg);
     },
 
@@ -285,13 +295,10 @@ function weightApp() {
 
       this.state = 'PRINTING';
       this.errorMessage = null;
+      this.errorModal.show = false;
       await this._printLabel(this.lastBag.weight_kg);
     },
 
-    /**
-     * Send label to printer with retry loop (3 attempts, 500ms fixed delay).
-     * On total failure, triggers background printer reset.
-     */
     async _printLabel(weightKg) {
       var maxAttempts = CONFIG.printRetryAttempts || 3;
       this.printMaxAttempts = maxAttempts;
@@ -310,11 +317,9 @@ function weightApp() {
 
       for (var attempt = 1; attempt <= maxAttempts; attempt++) {
         this.printAttempt = attempt;
-
-        // Show retrying state from attempt 2 onward
         if (attempt > 1) {
           this.state = 'PRINT_RETRYING';
-          this.errorMessage = 'Print failed, retrying...';
+          this.errorMessage = 'Retrying print...';
         }
 
         try {
@@ -331,42 +336,93 @@ function weightApp() {
           var printData = await printRes.json();
 
           if (printRes.ok && printData.status === 'ok') {
-            // Success
             this.state = 'PRINTED';
             this.errorMessage = null;
+            // Phase F: beep on success
+            this._playBeep('success');
             var self = this;
             this._autoResetId = setTimeout(function () {
-              if (self.state === 'PRINTED') {
-                self.state = 'IDLE';
-              }
+              if (self.state === 'PRINTED') self.state = 'IDLE';
             }, CONFIG.autoResetMs);
             return;
           }
-          // Server returned error (503 etc.) — continue to next attempt
         } catch (err) {
-          // Network error or timeout — continue to next attempt
+          // continue to next attempt
         }
 
-        // Wait before next retry (but not after the last attempt)
         if (attempt < maxAttempts) {
           await new Promise(function (r) { setTimeout(r, CONFIG.printRetryDelayMs || 500); });
         }
       }
 
-      // All attempts exhausted — show failure + trigger background reset
+      // Phase F: all attempts failed — show FULL SCREEN error modal, not small text
       this.state = 'PRINT_FAILED';
-      this.errorMessage = 'Print failed. Tap Retry Print.';
+      this.errorMessage = null;
+      this._showErrorModal(
+        '⚠  PRINTER ERROR',
+        'Label could not be printed after ' + maxAttempts + ' attempts.\n\nTap RETRY PRINT to try again, or check printer connection.',
+        true
+      );
+      this._playBeep('error');
       this._resetPrinterBackground();
     },
 
     // ══════════════════════════════════════════════════════════════
-    // Background printer reset (fire-and-forget after all retries fail)
+    // Phase F: Full-screen error modal
+    // ══════════════════════════════════════════════════════════════
+
+    _showErrorModal(title, body, showRetry) {
+      this.errorModal = { show: true, title: title, body: body, showRetry: !!showRetry };
+    },
+
+    dismissErrorModal() {
+      this.errorModal.show = false;
+      if (this.state === 'PRINT_FAILED') {
+        // Keep state so retry button still works via main UI
+      }
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // Phase F: Web Audio beep
+    // ══════════════════════════════════════════════════════════════
+
+    _playBeep(type) {
+      if (!CONFIG.enableBeep) return;
+      try {
+        var AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        var ctx = new AudioCtx();
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        if (type === 'success') {
+          // Two rising tones: pleasant confirmation
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          osc.frequency.setValueAtTime(1320, ctx.currentTime + 0.12);
+          gain.gain.setValueAtTime(0.25, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.35);
+        } else {
+          // Two falling tones: alert
+          osc.frequency.setValueAtTime(440, ctx.currentTime);
+          osc.frequency.setValueAtTime(220, ctx.currentTime + 0.18);
+          gain.gain.setValueAtTime(0.3, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.55);
+        }
+      } catch (e) { /* audio blocked or unavailable — silent */ }
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // Background printer reset
     // ══════════════════════════════════════════════════════════════
 
     async _resetPrinterBackground() {
       this.printResetting = true;
-      this.errorMessage = 'Resetting printer...';
-
       try {
         var res = await this._fetchWithTimeout(
           CONFIG.printServiceUrl + '/print/reset',
@@ -374,36 +430,31 @@ function weightApp() {
           CONFIG.printResetTimeoutMs || 20000
         );
         var data = await res.json();
-
-        if (data.connected) {
-          this.errorMessage = 'Printer reset. Tap Retry Print.';
-        } else {
-          this.errorMessage = 'Printer still offline. Check connection.';
+        if (!data.connected) {
+          this.errorModal.body += '\n\nPrinter is still offline.';
         }
-      } catch (err) {
-        this.errorMessage = 'Reset failed. Check printer.';
-      } finally {
+      } catch (err) { /* best effort */ }
+      finally {
         this.printResetting = false;
-        var self = this;
-        setTimeout(function () {
-          // Only clear if still showing a reset-related message
-          if (self.state === 'PRINT_FAILED') {
-            self.errorMessage = null;
-          }
-        }, 10000);
       }
     },
 
     // ══════════════════════════════════════════════════════════════
-    // Reprint last bag (no new bag, no counter increment)
+    // Reprint last bag
     // ══════════════════════════════════════════════════════════════
 
     async reprintLast() {
       if (!this.lastBag) return;
       if (this.state === 'PRINTING' || this.state === 'PRINTED' || this.state === 'PRINT_RETRYING') return;
 
+      // Phase F: same lock for reprint
+      var now = Date.now();
+      if (now < this._printLockUntil) return;
+      this._printLockUntil = now + (CONFIG.printLockMs || 2000);
+
       this.state = 'PRINTING';
       this.errorMessage = null;
+      this.errorModal.show = false;
       await this._printLabel(this.lastBag.weight_kg);
     },
 
@@ -418,7 +469,12 @@ function weightApp() {
     },
 
     get canPrint() {
-      return this.state === 'IDLE' && this.weightStatus === 'ok' && this.stable && this.selectedPackId && this.printerConnected && this.selectedWorker1;
+      return this.state === 'IDLE'
+        && this.weightStatus === 'ok'
+        && this.stable
+        && this.selectedPackId
+        && this.printerConnected
+        && this.selectedWorker1;
     },
 
     get weightDisplay() {
@@ -436,14 +492,14 @@ function weightApp() {
     get weightLabel() {
       if (this.weightStatus === 'disconnected') return 'Scale Disconnected';
       if (this.weightStatus === 'no_data') return 'No Weight Data';
-      if (this.stable) return 'Stable';
-      return 'Settling...';
+      if (this.stable) return '✓ Stable — Ready to Print';
+      return 'Settling…';
     },
 
     get weightStatusText() {
-      if (this.weightStatus === 'ok') return 'Weight Machine Connected';
-      if (this.weightServiceReachable && this.weightStatus === 'disconnected') return 'Connecting to Weight Machine';
-      return 'Weight Machine Disconnected';
+      if (this.weightStatus === 'ok') return 'Scale OK';
+      if (this.weightServiceReachable && this.weightStatus === 'disconnected') return 'Scale Connecting';
+      return 'Scale OFF';
     },
 
     get weightStatusClass() {
@@ -453,29 +509,30 @@ function weightApp() {
     },
 
     get printerStatusText() {
-      return this.printerConnected ? 'Printer Connected' : 'Printer Disconnected';
+      return this.printerConnected ? 'Printer OK' : 'Printer OFF';
     },
 
     get syncStatusText() {
-      return this.syncConnected ? 'Sync Connected' : 'Sync Disconnected';
+      return this.syncConnected ? 'Server OK' : 'Server OFF';
     },
 
+    // Phase F: bigger, clearer print button text
     get printButtonText() {
-      if (this.state === 'PRINTING') return 'Printing...';
-      if (this.state === 'PRINT_RETRYING') return 'Retrying... (' + this.printAttempt + '/' + this.printMaxAttempts + ')';
-      if (this.state === 'PRINTED') return 'Printed!';
-      if (this.state === 'PRINT_FAILED') return 'Retry Print';
-      if (this.weightStatus !== 'ok') return 'Scale Disconnected';
-      if (!this.printerConnected) return 'Printer Disconnected';
-      if (!this.selectedPackId) return 'Select Product';
-      if (!this.selectedWorker1) return 'Select Worker';
-      if (!this.stable) return 'Waiting for Stable Weight...';
+      if (this.state === 'PRINTING')      return '⏳  PRINTING…  PLEASE WAIT';
+      if (this.state === 'PRINT_RETRYING') return '⏳  RETRYING  (' + this.printAttempt + ' / ' + this.printMaxAttempts + ')';
+      if (this.state === 'PRINTED')       return '✓  PRINT SUCCESS';
+      if (this.state === 'PRINT_FAILED')  return '⚠  RETRY PRINT';
+      if (this.weightStatus !== 'ok')     return '⚠  Scale Not Ready';
+      if (!this.printerConnected)         return '⚠  Printer Not Connected';
+      if (!this.selectedPackId)           return 'Select Product First';
+      if (!this.selectedWorker1)          return 'Select Worker First';
+      if (!this.stable)                   return 'Waiting for Stable Weight…';
       return 'PRINT';
     },
 
     get printButtonDisabled() {
-      if (this.state === 'PRINT_FAILED') return false; // allow manual retry
-      if (this.state === 'PRINT_RETRYING') return true; // block during auto-retry
+      if (this.state === 'PRINT_FAILED') return false;
+      if (this.state === 'PRINT_RETRYING') return true;
       return !this.canPrint;
     },
 
@@ -484,7 +541,7 @@ function weightApp() {
       var w = this.lastBag.weight_gm
         ? (this.lastBag.weight_gm / 1000).toFixed(2) + ' kg'
         : '';
-      return '#' + this.lastBag.bag_number + '  ' + this.lastBag.qr_code + '  ' + w;
+      return '#' + this.lastBag.bag_number + '  ' + this.lastBag.pack_name + '  ' + w;
     },
 
     // ══════════════════════════════════════════════════════════════
@@ -495,12 +552,19 @@ function weightApp() {
       this.selectedPackId = String(packId);
     },
 
-    _updateRecentProducts(packId, packName) {
+    // Phase F: store richer data in recent list (weight + time for left panel)
+    _updateRecentProducts(packId, packName, weightKg, bagNumber) {
       var filtered = this.recentProducts.filter(function(p) {
         return String(p.pack_id) !== String(packId);
       });
-      filtered.unshift({ pack_id: packId, name: packName });
-      this.recentProducts = filtered.slice(0, 5);
+      filtered.unshift({
+        pack_id:    packId,
+        name:       packName,
+        weight_kg:  weightKg ? weightKg.toFixed(2) : null,
+        bag_number: bagNumber || null,
+        time:       new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      });
+      this.recentProducts = filtered.slice(0, 8);
       try { localStorage.setItem('recent_products', JSON.stringify(this.recentProducts)); } catch (e) { /* ignore */ }
     },
 
@@ -513,14 +577,11 @@ function weightApp() {
           break;
         }
       }
-      if (!found) {
-        this.bagsByProduct.push({ pack_name: packName, count: 1 });
-      }
+      if (!found) this.bagsByProduct.push({ pack_name: packName, count: 1 });
     },
 
     onWorker1Change() {
       try { localStorage.setItem('selectedWorker1', this.selectedWorker1); } catch (e) { /* ignore */ }
-      // Clear worker 2 if same as worker 1
       if (this.selectedWorker2 && this.selectedWorker2 === this.selectedWorker1) {
         this.selectedWorker2 = '';
         try { localStorage.setItem('selectedWorker2', ''); } catch (e) { /* ignore */ }

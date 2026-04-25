@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <!-- Phase F: removed user-scalable=no — workers can zoom if needed -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart Weight System</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -10,50 +11,81 @@
 
   <div class="app" x-data="weightApp()" x-init="init()" @unload.window="destroy()">
 
-    <!-- Error Banner -->
-    <div class="error-banner" x-show="errorMessage" x-text="errorMessage" x-transition></div>
+    <!-- Phase F: Full-screen error modal (print failures + critical sync errors) -->
+    <div class="error-modal" x-show="errorModal.show" x-cloak>
+      <div class="error-modal-box">
+        <div class="error-modal-title" x-text="errorModal.title"></div>
+        <div class="error-modal-body" x-text="errorModal.body"></div>
+        <div class="error-modal-actions">
+          <button class="error-modal-retry-btn"
+            x-show="errorModal.showRetry"
+            @click="retryPrint(); dismissErrorModal()">
+            RETRY PRINT
+          </button>
+          <button class="error-modal-dismiss-btn" @click="dismissErrorModal()">
+            CLOSE
+          </button>
+        </div>
+      </div>
+    </div>
 
-    <!-- Status Bar -->
+    <!-- Status Bar (Phase F: larger badges, clearer labels) -->
     <div class="status-bar">
-      <div class="status-item">
-        <strong x-text="'Station: ' + CONFIG.stationId"></strong>
+      <div class="status-item station-id">
+        <strong x-text="CONFIG.stationId"></strong>
       </div>
       <div class="status-item">
         <span class="status-badge" :class="weightStatusClass" x-text="weightStatusText"></span>
       </div>
       <div class="status-item">
-        <span class="status-badge" :class="printerConnected ? 'status-connected' : 'status-disconnected'"
+        <span class="status-badge"
+          :class="printerConnected ? 'status-connected' : 'status-disconnected'"
           x-text="printerStatusText"></span>
       </div>
       <div class="status-item">
-        <span class="status-badge" :class="syncConnected ? 'status-connected' : 'status-disconnected'"
+        <span class="status-badge"
+          :class="syncConnected ? 'status-connected' : 'status-disconnected'"
           x-text="syncStatusText"></span>
       </div>
     </div>
 
-    <!-- Today's bag count -->
+    <!-- Today's bag counter + Refresh button -->
     <div class="today-bar">
       <div class="today-total">
         <span class="bags-number" x-text="totalBagsToday"></span>
         <span class="bags-label">bags today</span>
       </div>
+      <!-- Phase F: manual master-data refresh -->
+      <button class="refresh-btn"
+        :disabled="refreshing"
+        @click="refreshMasterData()"
+        :class="{ spinning: refreshing }"
+        title="Refresh items and workers">
+        <span x-text="refreshing ? 'Refreshing…' : '⟳ Refresh'"></span>
+      </button>
     </div>
 
-    <!-- Main area: recent panel (left) + main column (right) -->
+    <!-- Main area -->
     <div class="main-area">
 
-      <!-- Recent Products Panel -->
+      <!-- Phase F: Recent panel — shows item + weight + time for each recent bag -->
       <div class="recent-panel">
         <div class="recent-panel-title">Recent</div>
-        <template x-for="p in recentProducts" :key="p.pack_id">
+
+        <template x-for="(p, idx) in recentProducts" :key="p.pack_id">
           <button
             class="recent-btn"
-            :class="{ active: String(selectedPackId) === String(p.pack_id) }"
+            :class="{ active: String(selectedPackId) === String(p.pack_id), 'recent-first': idx === 0 }"
             :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'"
-            @click="selectRecentProduct(p.pack_id)"
-            x-text="p.name"
-          ></button>
+            @click="selectRecentProduct(p.pack_id)">
+            <span class="recent-name" x-text="p.name"></span>
+            <span class="recent-meta" x-show="p.weight_kg">
+              <span x-text="p.weight_kg ? p.weight_kg + ' kg' : ''"></span>
+              <span x-show="p.time" x-text="' · ' + p.time"></span>
+            </span>
+          </button>
         </template>
+
         <div class="recent-empty" x-show="recentProducts.length === 0">No recent</div>
       </div>
 
@@ -69,11 +101,11 @@
           <div class="weight-status" x-text="weightLabel"></div>
         </div>
 
-        <!-- Product Selector (always visible) -->
+        <!-- Product Selector -->
         <div class="select-wrapper">
           <select class="product-select" x-model="selectedPackId"
             :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
-            <option value="">-- Select Product --</option>
+            <option value="">— Select Product —</option>
             <template x-for="p in products" :key="p.pack_id">
               <option
                 :value="p.pack_id"
@@ -90,7 +122,7 @@
             <select class="product-select worker-select" x-model="selectedWorker1"
               @change="onWorker1Change()"
               :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
-              <option value="">-- Worker 1 * --</option>
+              <option value="">— Worker 1 * —</option>
               <template x-for="w in workers" :key="w.worker_code">
                 <option :value="w.worker_code" x-text="w.worker_name + ' (' + w.worker_code + ')'"></option>
               </template>
@@ -101,7 +133,7 @@
             <select class="product-select worker-select" x-model="selectedWorker2"
               @change="onWorker2Change()"
               :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
-              <option value="">-- Worker 2 --</option>
+              <option value="">— Worker 2 —</option>
               <template x-for="w in filteredWorkers2" :key="w.worker_code">
                 <option :value="w.worker_code" x-text="w.worker_name + ' (' + w.worker_code + ')'"></option>
               </template>
@@ -110,28 +142,35 @@
           </div>
         </div>
 
-        <!-- Last Bag Info + Reprint -->
+        <!-- Phase F: Last Bag prominently displayed -->
         <div class="last-bag-row" x-show="lastBag" x-transition>
           <div class="last-bag-card">
-            <span class="last-bag-label">Last:</span>
-            <span class="last-bag-text" x-text="lastBagDisplay"></span>
+            <div class="last-bag-header">Last Printed</div>
+            <div class="last-bag-detail" x-text="lastBag ? lastBag.pack_name : ''"></div>
+            <div class="last-bag-meta">
+              <span x-text="lastBag && lastBag.weight_gm ? (lastBag.weight_gm/1000).toFixed(2) + ' kg' : ''"></span>
+              <span x-show="lastBag && lastBag.printed_at" x-text="lastBag ? ' · ' + lastBag.printed_at : ''"></span>
+              <span x-text="lastBag ? '  #' + lastBag.bag_number : ''"></span>
+            </div>
           </div>
+          <!-- Phase F: bigger reprint button -->
           <button class="reprint-btn"
             :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'"
-            @click="reprintLast()">Reprint</button>
+            @click="reprintLast()">
+            ↻ Reprint
+          </button>
         </div>
 
-        <!-- Spacer pushes button to bottom -->
         <div class="spacer"></div>
 
-        <!-- PRINT button (always visible) -->
+        <!-- PRINT button -->
         <button
           class="print-btn"
           :class="{
             printing: state === 'PRINTING',
             retrying: state === 'PRINT_RETRYING',
-            success: state === 'PRINTED',
-            error: state === 'PRINT_FAILED'
+            success:  state === 'PRINTED',
+            error:    state === 'PRINT_FAILED'
           }"
           :disabled="printButtonDisabled"
           @click="state === 'PRINT_FAILED' ? retryPrint() : doPrint()"
