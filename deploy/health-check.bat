@@ -2,7 +2,7 @@
 :: ============================================================
 :: Smart Weight System -- Health Check
 :: ============================================================
-:: Checks all 4 services and reports status.
+:: Checks all 5 services and reports status.
 :: Use this to quickly diagnose issues.
 :: ============================================================
 
@@ -43,28 +43,33 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo  Weight Service (port 5000):
+echo  Weight Service   (port 5000):
 curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:5000/health 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
 
 echo.
-echo  Print Service (port 5001):
+echo  Print Service    (port 5001):
 curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:5001/health 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
 
 echo.
-echo  Sync Service (port 5002):
+echo  Sync Service     (port 5002):
 curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:5002/health 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
 
 echo.
-echo  Web UI (port 3000):
+echo  Web UI           (port 3000):
 curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:3000/ 2>nul
+if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
+
+echo.
+echo  Dispatch Service (port 4000):
+curl -s -o nul -w "  HTTP %%{http_code} -- %%{time_total}s" http://localhost:4000/health 2>nul
 if %ERRORLEVEL% neq 0 (echo   UNREACHABLE) else (echo.)
 
 :skip_http
 
-:: Sync status (bags today, pending sessions)
+:: Sync status (bags today, pending sessions, dispatch stats)
 echo.
 echo.
 echo  [Sync Status]
@@ -77,7 +82,7 @@ echo.
 echo.
 echo  [Recent Errors -- last 5 lines per service]
 echo  -------------------------------------------
-for %%s in (weight-service print-service sync-service web-ui) do (
+for %%s in (weight-service print-service sync-service web-ui dispatch-service) do (
     echo.
     echo  --- %%s ---
     if exist "logs\%%s-error.log" (

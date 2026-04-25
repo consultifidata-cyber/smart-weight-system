@@ -11,6 +11,9 @@ import type {
   ItemMaster,
   WorkerMaster,
   ProductForDropdown,
+  DispatchDoc,
+  DispatchLineRow,
+  PartyMaster,
 } from '../types.js';
 
 export class Queries {
@@ -71,6 +74,19 @@ export class Queries {
   private _getBagByIdempotencyKey!: Database.Statement;     // Phase B
   private _incrementBagSyncAttempts!: Database.Statement;   // Phase D
   private _countStaleBags!: Database.Statement;             // Phase D
+
+  // ── Dispatch push statements (Phase DE) ──
+  private _listPendingDispatchDocs!:      Database.Statement;
+  private _getDispatchLinesByDoc!:        Database.Statement;
+  private _markDispatchDocSyncing!:       Database.Statement;
+  private _markDispatchDocSynced!:        Database.Statement;
+  private _markDispatchDocFailed!:        Database.Statement;
+  private _revertDispatchDocToPending!:   Database.Statement;
+  private _resetStuckDispatchDocs!:       Database.Statement;
+  private _countPendingDispatchDocs!:     Database.Statement;
+  private _countFailedDispatchDocs!:      Database.Statement;
+  private _countSyncedDispatchDocsToday!: Database.Statement;
+  private _insertPartyMaster!:            Database.Statement;
 
   constructor(db: Database.Database) {
     this.db = db;
@@ -332,6 +348,82 @@ export class Queries {
     this._countBagsToday = this.db.prepare(
       `SELECT COUNT(*) as count FROM fg_bag b JOIN fg_session s ON b.session_id = s.session_id WHERE s.entry_date = ?`
     );
+
+    // ── Dispatch push statements (Phase DE) ─────────────────────────────────
+    this._listPendingDispatchDocs = this.db.prepare(`
+      SELECT * FROM dispatch_doc
+      WHERE status = 'CLOSED' AND sync_status = 'PENDING'
+      ORDER BY closed_at ASC
+      LIMIT ?
+    `);
+
+    this._getDispatchLinesByDoc = this.db.prepare(`
+      SELECT * FROM dispatch_line WHERE doc_id = ? ORDER BY scanned_at ASC
+    `);
+
+    this._markDispatchDocSyncing = this.db.prepare(`
+      UPDATE dispatch_doc
+      SET sync_status = 'SYNCING', last_sync_at = datetime('now')
+      WHERE doc_id = ?
+    `);
+
+    this._markDispatchDocSynced = this.db.prepare(`
+      UPDATE dispatch_doc
+      SET sync_status = 'SYNCED',
+          django_doc_id = ?,
+          django_doc_no = ?,
+          sync_error    = NULL,
+          last_sync_at  = datetime('now')
+      WHERE doc_id = ?
+    `);
+
+    this._markDispatchDocFailed = this.db.prepare(`
+      UPDATE dispatch_doc
+      SET sync_status = 'FAILED',
+          sync_error   = ?,
+          last_sync_at = datetime('now')
+      WHERE doc_id = ?
+    `);
+
+    this._revertDispatchDocToPending = this.db.prepare(`
+      UPDATE dispatch_doc
+      SET sync_status = 'PENDING',
+          sync_error   = ?,
+          last_sync_at = datetime('now')
+      WHERE doc_id = ?
+    `);
+
+    this._resetStuckDispatchDocs = this.db.prepare(`
+      UPDATE dispatch_doc
+      SET sync_status = 'PENDING',
+          sync_error   = 'Reset from SYNCING on startup'
+      WHERE sync_status = 'SYNCING'
+    `);
+
+    this._countPendingDispatchDocs = this.db.prepare(
+      `SELECT COUNT(*) AS count FROM dispatch_doc WHERE sync_status = 'PENDING'`
+    );
+
+    this._countFailedDispatchDocs = this.db.prepare(
+      `SELECT COUNT(*) AS count FROM dispatch_doc WHERE sync_status = 'FAILED'`
+    );
+
+    this._countSyncedDispatchDocsToday = this.db.prepare(
+      `SELECT COUNT(*) AS count FROM dispatch_doc WHERE sync_status = 'SYNCED' AND entry_date = ?`
+    );
+
+    // True upsert: INSERT new parties, UPDATE existing on pk conflict.
+    // Never deletes — a transient empty response must not nuke the local cache.
+    this._insertPartyMaster = this.db.prepare(`
+      INSERT INTO party_master (party_id, party_name, party_code, gst_no, city, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(party_id) DO UPDATE SET
+        party_name = excluded.party_name,
+        party_code = excluded.party_code,
+        gst_no     = excluded.gst_no,
+        city       = excluded.city,
+        updated_at = datetime('now')
+    `);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -704,5 +796,57 @@ export class Queries {
 
   setMeta(key: string, value: string): void {
     this._upsertMeta.run(key, value);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Dispatch push operations (Phase DE)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  listPendingDispatchDocs(limit = 5): DispatchDoc[] {
+    return this._listPendingDispatchDocs.all(limit) as DispatchDoc[];
+  }
+
+  getDispatchLinesByDoc(docId: string): DispatchLineRow[] {
+    return this._getDispatchLinesByDoc.all(docId) as DispatchLineRow[];
+  }
+
+  markDispatchDocSyncing(docId: string): void {
+    this._markDispatchDocSyncing.run(docId);
+  }
+
+  markDispatchDocSynced(docId: string, djangoDocId: number, djangoDocNo: string): void {
+    this._markDispatchDocSynced.run(djangoDocId, djangoDocNo, docId);
+  }
+
+  markDispatchDocFailed(docId: string, error: string): void {
+    this._markDispatchDocFailed.run(error, docId);
+  }
+
+  revertDispatchDocToPending(docId: string, error: string): void {
+    this._revertDispatchDocToPending.run(error, docId);
+  }
+
+  resetStuckDispatchDocs(): number {
+    return this._resetStuckDispatchDocs.run().changes;
+  }
+
+  countPendingDispatchDocs(): number {
+    return (this._countPendingDispatchDocs.get() as { count: number }).count;
+  }
+
+  countFailedDispatchDocs(): number {
+    return (this._countFailedDispatchDocs.get() as { count: number }).count;
+  }
+
+  countSyncedDispatchDocsToday(today: string): number {
+    return (this._countSyncedDispatchDocsToday.get(today) as { count: number }).count;
+  }
+
+  replacePartyMasters(parties: PartyMaster[]): void {
+    this.db.transaction(() => {
+      for (const p of parties) {
+        this._insertPartyMaster.run(p.party_id, p.party_name, p.party_code, p.gst_no, p.city);
+      }
+    })();
   }
 }

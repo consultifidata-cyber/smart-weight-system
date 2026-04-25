@@ -22,16 +22,25 @@ router.get('/status', (req: Request, res: Response) => {
 
     const serverConfigured = !!config.djangoServerUrl;
 
+    // Dispatch stats (Phase DE)
+    const pendingDispatches = queries.countPendingDispatchDocs();
+    const failedDispatches  = queries.countFailedDispatchDocs();
+    const syncedDispatchesToday = queries.countSyncedDispatchDocsToday(today);
+
     res.json({
-      server_reachable: serverConfigured,
-      pending_entries: counts['PENDING'] || 0,
-      failed_entries: counts['FAILED'] || 0,
-      synced_today: syncedToday,
-      last_sync_at: queries.getMeta('last_sync_at'),
-      last_master_sync_at: lastMasterSync,
-      pending_sessions: pendingSessions,
-      closed_sessions_today: closedSessionsToday,
-      total_bags_today: bagsToday,
+      server_reachable:       serverConfigured,
+      pending_entries:        counts['PENDING'] || 0,
+      failed_entries:         counts['FAILED']  || 0,
+      synced_today:           syncedToday,
+      last_sync_at:           queries.getMeta('last_sync_at'),
+      last_master_sync_at:    lastMasterSync,
+      pending_sessions:       pendingSessions,
+      closed_sessions_today:  closedSessionsToday,
+      total_bags_today:       bagsToday,
+      pending_dispatches:     pendingDispatches,
+      failed_dispatches:      failedDispatches,
+      synced_dispatches_today: syncedDispatchesToday,
+      last_dispatch_sync_at:  queries.getMeta('last_dispatch_sync_at'),
     });
   } catch (err: unknown) {
     const error = err instanceof Error ? err.message : String(err);
@@ -55,7 +64,8 @@ router.post('/master-refresh', async (req: Request, res: Response) => {
       status:         'ok',
       products_count: result.products,
       items_count:    result.items,
-      workers_count:  result.workers,   // Phase G
+      workers_count:  result.workers,
+      parties_count:  result.parties,
       synced_at:      new Date().toISOString(),
     });
   } catch (err: unknown) {

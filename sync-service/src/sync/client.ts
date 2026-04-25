@@ -8,6 +8,9 @@ import type {
   AddBagResponse,
   CloseSessionResponse,
   PushEntryResponse,
+  DispatchLineForPush,
+  PushDispatchResponse,
+  PartyMaster,
 } from '../types.js';
 
 /**
@@ -187,6 +190,55 @@ export class DjangoClient {
   // ════════════════════════════════════════════════════════════════════════
   // Offline catch-up (bulk push)
   // ════════════════════════════════════════════════════════════════════════
+
+  // ════════════════════════════════════════════════════════════════════════
+  // Dispatch push (Phase DE)
+  // ════════════════════════════════════════════════════════════════════════
+
+  async pushDispatch(data: {
+    idempotency_key: string;
+    entry_date:      string;
+    truck_no:        string;
+    customer_id:     number | null;
+    customer_name:   string;
+    location:        string | null;
+    shift:           string | null;
+    delay_reason:    string | null;
+    lines:           DispatchLineForPush[];
+  }): Promise<PushDispatchResponse> {
+    const response = await fetch(`${this.serverUrl}/api/station/push-dispatch/`, {
+      method: 'POST',
+      headers: this.authHeaders,
+      body: JSON.stringify(data),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`push-dispatch failed: ${response.status} ${body}`);
+    }
+
+    return response.json() as Promise<PushDispatchResponse>;
+  }
+
+  // GET /api/station/party-masters/ — pull customer list for dispatch form.
+  // BLOCKED: Django endpoint does not exist yet (Phase DD-bis required).
+  // Wire up in engine.ts once the endpoint is live.
+  async fetchPartyMasters(): Promise<PartyMaster[]> {
+    if (!this.isConfigured) return [];
+
+    const response = await fetch(`${this.serverUrl}/api/station/party-masters/`, {
+      headers: this.authHeaders,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch party masters: ${response.status}`);
+    }
+
+    const data = await response.json() as { parties: PartyMaster[] };
+    return data.parties;
+  }
 
   async pushEntry(data: {
     idempotency_key: string;

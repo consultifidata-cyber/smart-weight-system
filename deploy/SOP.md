@@ -211,12 +211,11 @@ Before setting up the station software, register it in the Django ERP system.
    | Django API token | (64-char hex string) | From step 4 (Django admin) |
 
 5. The installer will:
-   - Install PM2 globally
-   - Create the `.env` file
-   - Install all npm dependencies
-   - Start all 4 services
-   - Configure auto-start on Windows boot
-   - Create a desktop shortcut
+   - Create the `.env` file with your station settings
+   - Register the `SmartWeightSystem` Windows Service (NSSM, auto-start on boot)
+   - Open Windows Firewall for ports 3000, 4000, 5000, 5001, 5002
+   - Start all 5 services automatically
+   - Create desktop shortcuts
    - Open the web-ui in the browser
 
 6. You should see the Smart Weight System UI in the browser.
@@ -231,21 +230,12 @@ After installation, run through this checklist:
 
 Open Command Prompt and run:
 ```
-pm2 status
+curl http://localhost:5099/health
 ```
 
-You should see 4 services, all with status **online**:
+All 5 services should show `"status": "running"` in the JSON response.
 
-```
-┌──────────────────┬────┬──────┬────────┐
-│ name             │ id │ mode │ status │
-├──────────────────┼────┼──────┼────────┤
-│ weight-service   │ 0  │ fork │ online │
-│ print-service    │ 1  │ fork │ online │
-│ sync-service     │ 2  │ fork │ online │
-│ web-ui           │ 3  │ fork │ online │
-└──────────────────┴────┴──────┴────────┘
-```
+You can also check the Windows Service Manager: `services.msc` → look for **Smart Weight System** (should be Running, Automatic).
 
 ### 7.2 Health Check
 
@@ -254,7 +244,15 @@ Double-click `deploy\health-check.bat` or run:
 deploy\health-check.bat
 ```
 
-All 4 endpoints should return **HTTP 200**.
+All 5 endpoints should return **HTTP 200**:
+
+| Service | Port | URL |
+|---------|------|-----|
+| web-ui | 3000 | http://localhost:3000 |
+| dispatch-service | 4000 | http://localhost:4000/health |
+| weight-service | 5000 | http://localhost:5000/health |
+| print-service | 5001 | http://localhost:5001/health |
+| sync-service | 5002 | http://localhost:5002/health |
 
 ### 7.3 Scale Test
 
@@ -277,12 +275,23 @@ All 4 endpoints should return **HTTP 200**.
    - `synced_today` should increment after each session is closed
 2. Verify in Django admin that the FG Production entry was created
 
-### 7.6 Reboot Test
+### 7.6 Dispatch Test (Laptop B)
+
+1. On **Laptop B**, open a browser and navigate to:
+   ```
+   http://<Laptop-A-IP>:3000/dispatch/
+   ```
+   Replace `<Laptop-A-IP>` with the IP shown by `ipconfig` on Laptop A.
+2. You should see the **Truck Loading** screen.
+3. Click **+ New Dispatch**, fill in truck number and customer, click **Start**.
+4. Scan a bag label — it should appear green in the scan list.
+
+### 7.7 Reboot Test
 
 1. Restart the computer
-2. After Windows loads, wait 30 seconds
+2. After Windows loads, wait 60 seconds (first-boot AV scan may slow startup)
 3. Open http://localhost:3000 — the web-ui should load automatically
-4. Check `pm2 status` — all services should be online
+4. Run `deploy\health-check.bat` — all 5 services should be healthy
 
 ---
 
@@ -290,15 +299,18 @@ All 4 endpoints should return **HTTP 200**.
 
 ### Service won't start
 
-```bash
-# Check logs for the failing service
-pm2 logs weight-service --lines 50
+```
+# Check the launcher health endpoint
+curl http://localhost:5099/health
 
-# Restart a single service
-pm2 restart weight-service
+# Check service logs (replace with the failing service name)
+type C:\SmartWeightSystem\logs\sync-service-error.log
 
-# Restart all services
-pm2 restart all
+# Restart all services via Windows
+net stop SmartWeightSystem
+net start SmartWeightSystem
+
+# Or double-click deploy\stop-all.bat then deploy\start-all.bat
 ```
 
 ### Scale not reading
@@ -328,13 +340,25 @@ pm2 restart all
 
 ### Services don't auto-start after reboot
 
-1. Check the startup shortcut exists:
-   - Press `Win + R` → type `shell:startup` → Enter
-   - You should see `SmartWeightSystem.lnk`
-2. If missing, run the installer again or manually create a shortcut:
-   - Right-click on desktop → New → Shortcut
-   - Target: `C:\smart-weight-system\deploy\start-all.bat`
-   - Move the shortcut to the Startup folder
+The system uses a Windows Service (NSSM), not a startup shortcut.
+
+1. Open `services.msc` → check **Smart Weight System** is Present and set to **Automatic**
+2. If the service is missing, re-run the installer (`SmartWeightSetup.exe`) — it will re-register it
+3. If the service is Stopped, start it: `net start SmartWeightSystem`
+4. Check `C:\SmartWeightSystem\logs\launcher-svc.log` for startup errors
+
+### Dispatch service not reachable from Laptop B
+
+1. Confirm Laptop A's firewall allows port 4000:
+   ```
+   powershell -File "C:\SmartWeightSystem\tools\add-firewall-rules.ps1"
+   ```
+2. From Laptop A, verify dispatch-service is running:
+   ```
+   curl http://localhost:4000/health
+   ```
+3. From Laptop B, try pinging Laptop A first: `ping <Laptop-A-IP>`
+4. Both laptops must be on the same network (same WiFi or Ethernet switch)
 
 ### `npm install` fails with `gyp ERR! find Python`
 
@@ -365,50 +389,53 @@ Either close the conflicting application or change the port in `.env`.
 
 ### Starting the System
 
-Normally auto-starts on boot. If not running:
-- Double-click **deploy\start-all.bat**, or
-- Double-click the **Smart Weight System** desktop shortcut
+Normally auto-starts on boot via the `SmartWeightSystem` Windows Service. If not running:
+- Double-click **deploy\start-all.bat** (starts via launcher), or
+- `net start SmartWeightSystem` in an Administrator command prompt
 
 ### Checking Status
 
-- Double-click **deploy\health-check.bat** for a full diagnostics report
-- Or run `pm2 status` in Command Prompt
+- Double-click **deploy\health-check.bat** for a full diagnostics report (checks all 5 services)
+- Or: `curl http://localhost:5099/health` for the launcher health JSON
 
 ### Viewing Logs
 
-```bash
-# Live logs (all services)
-pm2 logs
+```
+# View recent errors for any service (replace service name as needed)
+type C:\SmartWeightSystem\logs\sync-service-error.log
 
-# Specific service logs
-pm2 logs sync-service
-
-# Last 100 lines
-pm2 logs --lines 100
+# Sync/dispatch status
+curl http://localhost:5002/sync/status
 ```
 
 ### Stopping the System
 
 - Double-click **deploy\stop-all.bat**, or
-- Run `pm2 stop all` in Command Prompt
+- `net stop SmartWeightSystem` in an Administrator command prompt
 
 ---
 
 ## 10. Updating to a New Version
 
-When a new version is pushed to GitHub:
+When a new installer is released:
 
+**Option A — Installer upgrade (recommended for major updates)**
+1. Download the new `SmartWeightSetup.exe`
+2. Run as Administrator — it detects the existing install, stops the service, replaces files, and restarts
+3. Your `.env`, database (`fg_production.db`), and logs are **never deleted** by the installer
+4. Verify with `deploy\health-check.bat`
+
+**Option B — Git pull (for minor updates / dev environment)**
 1. Double-click **deploy\update.bat**, or run manually:
    ```
-   cd C:\smart-weight-system
+   cd C:\SmartWeightSystem
    git pull origin main
    npm install
-   pm2 restart all
    ```
+2. Then restart the service: `net stop SmartWeightSystem && net start SmartWeightSystem`
+3. Verify with `deploy\health-check.bat`
 
-2. Verify with `deploy\health-check.bat`
-
-**Note:** The `.env` file is in `.gitignore` — your station config is preserved during updates.
+**Note:** The `.env` file is in `.gitignore` — your station config is always preserved.
 
 ---
 
@@ -418,11 +445,13 @@ Print this and stick it near the station.
 
 | Action | How |
 |--------|-----|
-| Open web-ui | Double-click **Smart Weight System** on desktop |
+| Open weight station UI | Double-click **Smart Weight System** on desktop, or http://localhost:3000 |
+| Open dispatch UI (Laptop B) | Browser → `http://<Laptop-A-IP>:3000/dispatch/` |
 | Start services | Double-click **deploy\start-all.bat** |
 | Stop services | Double-click **deploy\stop-all.bat** |
 | Health check | Double-click **deploy\health-check.bat** |
 | Update code | Double-click **deploy\update.bat** |
-| View logs | Command Prompt → `pm2 logs` |
-| Restart one service | Command Prompt → `pm2 restart weight-service` |
+| View logs | `type C:\SmartWeightSystem\logs\<service>-error.log` |
+| Restart all services | `net stop SmartWeightSystem` then `net start SmartWeightSystem` |
 | Check sync status | Browser → http://localhost:5002/sync/status |
+| Check dispatch sync | `curl http://localhost:5002/health` → see `dispatch` block |

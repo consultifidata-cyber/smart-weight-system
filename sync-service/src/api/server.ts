@@ -19,7 +19,7 @@ declare global {
         queries: Queries;
         config: SyncServiceConfig;
         pushNow?: (localEntryId: string) => void;
-        pullMasterData?: () => Promise<{ products: number; items: number }>;
+        pullMasterData?: () => Promise<{ products: number; items: number; workers: number; parties: number }>;
         client?: DjangoClient;
         syncEngine?: SyncEngine;
       };
@@ -31,7 +31,7 @@ export function createServer(
   queries: Queries,
   config: SyncServiceConfig,
   pushNow?: (localEntryId: string) => void,
-  pullMasterData?: () => Promise<{ products: number; items: number }>,
+  pullMasterData?: () => Promise<{ products: number; items: number; workers: number; parties: number }>,
   client?: DjangoClient,
   syncEngine?: SyncEngine,
 ): express.Express {
@@ -55,13 +55,21 @@ export function createServer(
   app.use('/workers', workersRouter);
 
   // Root health check
-  app.get('/health', (_req: Request, res: Response) => {
+  app.get('/health', (req: Request, res: Response) => {
+    const today = new Date().toISOString().substring(0, 10);
     res.json({
-      service: 'sync-service',
+      service:   'sync-service',
       stationId: config.stationId,
-      status: 'ok',
-      database: 'connected',
-      uptime: process.uptime(),
+      status:    'ok',
+      database:  'connected',
+      uptime:    process.uptime(),
+      dispatch: {
+        pending_dispatches:        req.ctx.queries.countPendingDispatchDocs(),
+        failed_dispatches:         req.ctx.queries.countFailedDispatchDocs(),
+        synced_dispatches_today:   req.ctx.queries.countSyncedDispatchDocsToday(today),
+        last_dispatch_sync_at:     req.ctx.queries.getMeta('last_dispatch_sync_at'),
+        last_pull_party_at:        req.ctx.queries.getMeta('last_pull_party_at'),
+      },
     });
   });
 

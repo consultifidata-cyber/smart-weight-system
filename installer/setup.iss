@@ -117,6 +117,11 @@ Source: "..\web-ui\*"; \
   Flags: recursesubdirs createallsubdirs; \
   Excludes: ".git,.gitignore"
 
+Source: "..\dispatch-service\*"; \
+  DestDir: "{app}\dispatch-service"; \
+  Flags: recursesubdirs createallsubdirs; \
+  Excludes: ".git,.gitignore,*.test.ts"
+
 ; ── Shared node_modules (pre-built native binaries from CI) ──────────────────
 Source: "..\node_modules\*"; \
   DestDir: "{app}\node_modules"; \
@@ -133,6 +138,7 @@ Name: "{app}\logs"
 Name: "{app}\tools"
 Name: "{app}\node-runtime"
 Name: "{app}\uninstall"
+Name: "{app}\dispatch-service"
 
 ; ── Run: post-install scripts ────────────────────────────────────────────────
 [Run]

@@ -1,14 +1,19 @@
 import config from './config.js';
 import logger from './utils/logger.js';
-import { initDb, closeDb } from './db/connection.js';
+import { initDb, waitForDispatchTables, closeDb } from './db/connection.js';
 import { DispatchQueries } from './db/queries.js';
 import { createServer } from './api/server.js';
 
 async function main(): Promise<void> {
   logger.info({ port: config.apiPort, station: config.stationId }, 'Starting dispatch-service');
 
-  // Open the shared SQLite DB (same file as sync-service)
-  const db      = initDb(config.dbPath);
+  // Open the shared SQLite DB (same file as sync-service).
+  // Then wait up to 30 s for sync-service to finish running migrations —
+  // both services start simultaneously under the launcher, so dispatch-service
+  // must not assume tables exist on the first attempt.
+  const db = initDb(config.dbPath);
+  await waitForDispatchTables(db);
+
   const queries = new DispatchQueries(db);
 
   const app    = createServer(queries);

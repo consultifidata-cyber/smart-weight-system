@@ -86,7 +86,7 @@ Get-Process -Name 'node' -ErrorAction SilentlyContinue | ForEach-Object {
 }
 
 # 3. Kill any process holding our ports (e.g., old PM2, manual node starts)
-$ourPorts = @(3000, 5000, 5001, 5002, $HealthPort)
+$ourPorts = @(3000, 4000, 5000, 5001, 5002, $HealthPort)
 foreach ($port in $ourPorts) {
     $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
     foreach ($conn in $conns) {
@@ -169,11 +169,12 @@ Write-Host "[OK] Launcher : $launcherScript" -ForegroundColor Green
 # Fix 1 — Port conflict pre-check (before we touch anything)
 Write-Host '-- Checking port availability...'
 $portChecks = @(
-    @{ Port=3000;     Name='Web UI'          },
-    @{ Port=5000;     Name='Weight Service'  },
-    @{ Port=5001;     Name='Print Service'   },
-    @{ Port=5002;     Name='Sync Service'    },
-    @{ Port=$HealthPort; Name='Launcher Health' }
+    @{ Port=3000;        Name='Web UI'             },
+    @{ Port=4000;        Name='Dispatch Service'   },
+    @{ Port=5000;        Name='Weight Service'     },
+    @{ Port=5001;        Name='Print Service'      },
+    @{ Port=5002;        Name='Sync Service'       },
+    @{ Port=$HealthPort; Name='Launcher Health'    }
 )
 $portConflicts = @()
 foreach ($check in $portChecks) {
@@ -318,11 +319,12 @@ try {
 Write-Host '-- Adding Windows Firewall inbound rules...'
 
 $fwRules = @(
-    @{ Name='SWS-WebUI';     Port=3000; Desc='Smart Weight System — Web UI'         },
-    @{ Name='SWS-WeightSvc'; Port=5000; Desc='Smart Weight System — Weight Service' },
-    @{ Name='SWS-PrintSvc';  Port=5001; Desc='Smart Weight System — Print Service'  },
-    @{ Name='SWS-SyncSvc';   Port=5002; Desc='Smart Weight System — Sync Service'   },
-    @{ Name='SWS-Launcher';  Port=$HealthPort; Desc='Smart Weight System — Launcher Health' }
+    @{ Name='SWS-WebUI';       Port=3000;        Desc='Smart Weight System — Web UI'                  },
+    @{ Name='SWS-DispatchSvc'; Port=4000;        Desc='Smart Weight System — Dispatch Service (LAN)'  },
+    @{ Name='SWS-WeightSvc';   Port=5000;        Desc='Smart Weight System — Weight Service'          },
+    @{ Name='SWS-PrintSvc';    Port=5001;        Desc='Smart Weight System — Print Service'           },
+    @{ Name='SWS-SyncSvc';     Port=5002;        Desc='Smart Weight System — Sync Service'            },
+    @{ Name='SWS-Launcher';    Port=$HealthPort; Desc='Smart Weight System — Launcher Health'         }
 )
 
 foreach ($rule in $fwRules) {
@@ -385,8 +387,10 @@ if ($healthy) {
         Write-Host "    $icon $($svc.name.PadRight(20)) $($svc.status)  (PID $($svc.pid))"
     }
     Write-Host ''
-    Write-Host "  Web UI  → http://localhost:3000"
-    Write-Host "  Health  → http://localhost:$HealthPort/health"
+    Write-Host "  Web UI       → http://localhost:3000"
+    Write-Host "  Dispatch UI  → http://localhost:3000/dispatch/"
+    Write-Host "  Dispatch API → http://localhost:4000/health"
+    Write-Host "  Health       → http://localhost:$HealthPort/health"
 } else {
     Write-Host "  [INSTALLED]  Service '$ServiceName' registered." -ForegroundColor Yellow
     Write-Host '  [WARN]  Health endpoint did not respond within 30s.' -ForegroundColor Yellow

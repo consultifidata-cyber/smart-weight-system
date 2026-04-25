@@ -402,10 +402,12 @@ Write-Host "  ================================================" -ForegroundColor
 Write-Host "  Installation Complete!" -ForegroundColor Green
 Write-Host "  ================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Web UI:       http://localhost:3000" -ForegroundColor White
-Write-Host "  Weight API:   http://localhost:5000/health" -ForegroundColor White
-Write-Host "  Print API:    http://localhost:5001/health" -ForegroundColor White
-Write-Host "  Sync API:     http://localhost:5002/health" -ForegroundColor White
+Write-Host "  Web UI:         http://localhost:3000" -ForegroundColor White
+Write-Host "  Dispatch UI:    http://localhost:3000/dispatch/" -ForegroundColor White
+Write-Host "  Dispatch API:   http://localhost:4000/health" -ForegroundColor White
+Write-Host "  Weight API:     http://localhost:5000/health" -ForegroundColor White
+Write-Host "  Print API:      http://localhost:5001/health" -ForegroundColor White
+Write-Host "  Sync API:       http://localhost:5002/health" -ForegroundColor White
 Write-Host ""
 Write-Host "  Useful commands:" -ForegroundColor DarkGray
 Write-Host "    deploy\health-check.bat -- Full health check" -ForegroundColor DarkGray

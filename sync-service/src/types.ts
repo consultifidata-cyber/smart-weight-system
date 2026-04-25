@@ -221,6 +221,78 @@ export interface SyncResult {
   error?: string;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Dispatch types (Phase DE)
+// ══════════════════════════════════════════════════════════════════════════════
+
+export interface DispatchDoc {
+  doc_id:          string;
+  doc_no:          string;
+  entry_date:      string;
+  truck_no:        string;
+  customer_id:     number | null;
+  customer_name:   string;
+  location:        string | null;
+  plant_id:        string;
+  shift_id:        string | null;
+  delay_reason:    string | null;
+  status:          string;   // DRAFT | CLOSED | DECLINED
+  sync_status:     string;   // LOCAL | PENDING | SYNCING | SYNCED | FAILED
+  idempotency_key: string | null;
+  total_bags:      number;
+  total_weight_gm: number;
+  created_at:      string;
+  closed_at:       string | null;
+  django_doc_id:   number | null;
+  django_doc_no:   string | null;
+  sync_error:      string | null;
+  last_sync_at:    string | null;
+}
+
+export interface DispatchLineRow {
+  line_id:          string;
+  doc_id:           string;
+  qr_code:          string;
+  bag_id:           string | null;
+  pack_name:        string | null;
+  pack_config_id:   number | null;
+  item_id:          number | null;
+  actual_weight_gm: number | null;
+  source:           string;
+  scanned_at:       string;
+  synced:           number;
+  django_line_id:   number | null;
+  sync_error:       string | null;
+}
+
+export interface DispatchLineForPush {
+  qr_code:          string;
+  bag_id:           string | null;
+  pack_name:        string | null;
+  pack_config_id:   number | null;
+  item_id:          number | null;
+  actual_weight_gm: number | null;
+  source:           string;
+  scanned_at:       string;
+}
+
+export interface PushDispatchResponse {
+  status:          string;
+  doc_id:          number;
+  doc_no:          string;
+  total_bags:      number;
+  total_weight_gm: number;
+  idempotent?:     boolean;
+}
+
+export interface PartyMaster {
+  party_id:   number;
+  party_name: string;
+  party_code: string | null;
+  gst_no:     string | null;
+  city:       string | null;
+}
+
 export interface SyncStatusResponse {
   server_reachable: boolean;
   pending_entries: number;

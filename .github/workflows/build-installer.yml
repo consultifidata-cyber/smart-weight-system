@@ -170,7 +170,7 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Installer not found: $exe" }
           $sizeMB = [math]::Round((Get-Item $exe).Length / 1MB, 1)
           Write-Host "Installer size: $sizeMB MB"
-          if ($sizeMB -lt 30) { throw "Installer suspiciously small ($sizeMB MB) — check bundling" }
+          if ($sizeMB -lt 30) { throw "Installer suspiciously small ($sizeMB MB) — dispatch-service may be missing from [Files]" }
           Write-Host "Installer verified OK: $exe ($sizeMB MB)"
           # Confirm exact filename for release asset (must be SmartWeightSetup.exe exactly)
           $name = Split-Path $exe -Leaf
@@ -222,9 +222,20 @@ jobs:
 
             ### What gets installed
             - Application to `C:\SmartWeightSystem\`
-            - Windows Service `SmartWeightSystem` (auto-start on boot)
-            - Firewall rules for ports 3000, 5000, 5001, 5002, 5099
+            - Windows Service `SmartWeightSystem` (auto-start on boot, manages all 5 services)
+            - Firewall rules for ports 3000, 4000, 5000, 5001, 5002, 5099
             - Node.js runtime v${{ env.NODE_VERSION }} (bundled — no system install needed)
+
+            ### Services
+            | Service | Port | Description |
+            |---------|------|-------------|
+            | web-ui | 3000 | Operator UI + Dispatch UI (`/dispatch/`) |
+            | dispatch-service | 4000 | Truck loading API (LAN-accessible from Laptop B) |
+            | weight-service | 5000 | Scale reader |
+            | print-service | 5001 | Label printer |
+            | sync-service | 5002 | Django ERP sync + SQLite migrations |
+
+            Dispatch UI from Laptop B: `http://<Laptop-A-IP>:3000/dispatch/`
 
             ### Verify
             ```

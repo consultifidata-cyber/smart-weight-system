@@ -110,7 +110,7 @@ Start-Sleep -Seconds 1
 
 # ── Remove firewall rules ─────────────────────────────────────────────────────
 Write-Host '-- Removing Windows Firewall rules...'
-$fwRuleNames = @('SWS-WebUI','SWS-WeightSvc','SWS-PrintSvc','SWS-SyncSvc','SWS-Launcher')
+$fwRuleNames = @('SWS-WebUI','SWS-DispatchSvc','SWS-WeightSvc','SWS-PrintSvc','SWS-SyncSvc','SWS-Launcher')
 foreach ($name in $fwRuleNames) {
     Remove-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue
     Write-Host "   Removed firewall rule: $name"

@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import logger from '../utils/logger.js';
 import { generateBagIdempotencyKey } from '../sync/idempotency.js';
 
-const LATEST_VERSION = 8;
+const LATEST_VERSION = 9;
 
 const migrations: Record<number, (db: Database.Database) => void> = {
   // Version 0 → 1: Core entry tables
@@ -307,6 +307,13 @@ const migrations: Record<number, (db: Database.Database) => void> = {
     `);
 
     logger.info('Migration 8: dispatch_doc, dispatch_line, party_master tables created (Phase DA)');
+  },
+
+  // ── Version 8 → 9: Dispatch line sync error tracking (Phase DE) ────────────
+  // Additive ALTER TABLE — zero impact on existing data.
+  9: (db) => {
+    db.exec(`ALTER TABLE dispatch_line ADD COLUMN sync_error TEXT`);
+    logger.info('Migration 9: dispatch_line.sync_error column added (Phase DE)');
   },
 };
 

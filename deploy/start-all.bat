@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 :: ============================================================
 :: Smart Weight System -- Start All Services
 :: ============================================================
-:: Double-click or run from cmd to start all 4 services.
+:: Double-click or run from cmd to start all 5 services.
 :: After starting, opens the web-ui in the default browser.
 :: ============================================================
 

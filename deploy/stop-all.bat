@@ -3,8 +3,9 @@ setlocal enabledelayedexpansion
 :: ============================================================
 :: Smart Weight System -- Stop All Services (graceful)
 :: ============================================================
+:: Stops all 5 services gracefully via the launcher.
 :: Phase 1: send graceful stop (taskkill without /F).
-::          Launcher catches it and asks services to drain.
+::          Launcher catches it and asks all 5 services to drain.
 :: Phase 2: wait 7s, then force-kill any stragglers.
 :: ============================================================
 

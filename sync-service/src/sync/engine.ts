@@ -3,7 +3,7 @@ import logger from '../utils/logger.js';
 import { generateSessionIdempotencyKey } from './idempotency.js';
 import type { Queries } from '../db/queries.js';
 import type { DjangoClient } from './client.js';
-import type { FGSession, FGBag } from '../types.js';
+import type { FGSession, FGBag, DispatchDoc } from '../types.js';
 import type { SyncServiceConfig } from '../config.js';
 
 const MAX_RETRIES = 10;
@@ -16,10 +16,13 @@ export class SyncEngine {
   private retryIntervalMs: number;
   private masterSyncIntervalMs: number;
   private bagSyncIntervalMs: number;
+  private readonly dispatchSyncIntervalMs = 30_000;
   private retryTimerId: ReturnType<typeof setInterval> | null = null;
   private masterTimerId: ReturnType<typeof setInterval> | null = null;
   private bagSyncTimerId: ReturnType<typeof setInterval> | null = null;
-  private bagSyncRunning = false; // guard against overlapping cycles
+  private dispatchSyncTimerId: ReturnType<typeof setInterval> | null = null;
+  private bagSyncRunning = false;
+  private dispatchSyncRunning = false;
 
   constructor(
     queries: Queries,
@@ -42,6 +45,12 @@ export class SyncEngine {
     const resetCount = this.queries.resetStuckSyncingSessions();
     if (resetCount > 0) {
       logger.warn({ resetCount }, 'Reset stuck SYNCING sessions to PENDING on startup');
+    }
+
+    // Startup recovery: reset dispatch docs stuck in SYNCING (Phase DE)
+    const dispatchReset = this.queries.resetStuckDispatchDocs();
+    if (dispatchReset > 0) {
+      logger.warn({ dispatchReset }, 'Reset stuck SYNCING dispatch docs to PENDING on startup');
     }
 
     // Phase D: warn about stale bags (synced=0 from past dates) on startup.
@@ -80,6 +89,9 @@ export class SyncEngine {
     // Master data sync timer
     this.masterTimerId = setInterval(() => this.pullMasterData(), this.masterSyncIntervalMs);
 
+    // Dispatch push timer — 30s (Phase DE)
+    this.dispatchSyncTimerId = setInterval(() => this.pushDispatchesCycle(), this.dispatchSyncIntervalMs);
+
     // Initial master data check
     this.checkInitialMasterSync();
   }
@@ -96,6 +108,10 @@ export class SyncEngine {
     if (this.masterTimerId) {
       clearInterval(this.masterTimerId);
       this.masterTimerId = null;
+    }
+    if (this.dispatchSyncTimerId) {
+      clearInterval(this.dispatchSyncTimerId);
+      this.dispatchSyncTimerId = null;
     }
     logger.info('Sync engine stopped');
   }
@@ -586,23 +602,25 @@ export class SyncEngine {
     setTimeout(retry, retryDelayMs);
   }
 
-  async pullMasterData(): Promise<{ products: number; items: number; workers: number }> {
+  async pullMasterData(): Promise<{ products: number; items: number; workers: number; parties: number }> {
     if (!this.client.isConfigured) {
       logger.debug('Django server not configured, skipping master data pull');
-      return { products: 0, items: 0, workers: 0 };
+      return { products: 0, items: 0, workers: 0, parties: 0 };
     }
 
     logger.info('Pulling master data from Django');
 
-    const [configsResult, itemsResult, workersResult] = await Promise.allSettled([
+    const [configsResult, itemsResult, workersResult, partiesResult] = await Promise.allSettled([
       this.client.fetchPackConfigs(),
       this.client.fetchItemMasters(),
       this.client.fetchWorkerMasters(),
+      this.client.fetchPartyMasters(),
     ]);
 
     let products = 0;
     let items    = 0;
-    let workers  = 0;   // Phase G
+    let workers  = 0;
+    let parties  = 0;
 
     if (configsResult.status === 'fulfilled') {
       this.queries.replacePackConfigs(configsResult.value);
@@ -620,16 +638,129 @@ export class SyncEngine {
 
     if (workersResult.status === 'fulfilled') {
       this.queries.replaceWorkerMasters(workersResult.value);
-      workers = workersResult.value.length;   // Phase G
+      workers = workersResult.value.length;
     } else {
       logger.error({ error: workersResult.reason?.message || String(workersResult.reason) }, 'Failed to fetch worker masters');
+    }
+
+    if (partiesResult.status === 'fulfilled') {
+      this.queries.replacePartyMasters(partiesResult.value);
+      parties = partiesResult.value.length;
+      this.queries.setMeta('last_pull_party_at', new Date().toISOString());
+      logger.info(`[sync-service][party-pull] received ${parties} parties`);
+    } else {
+      logger.error({ error: partiesResult.reason?.message || String(partiesResult.reason) }, 'Failed to fetch party masters');
     }
 
     if (configsResult.status === 'fulfilled' || itemsResult.status === 'fulfilled' || workersResult.status === 'fulfilled') {
       this.queries.setMeta('last_master_sync_at', new Date().toISOString());
     }
 
-    logger.info({ products, items, workers }, 'Master data pull complete');
-    return { products, items, workers };   // Phase G: include workers count
+    logger.info({ products, items, workers, parties }, 'Master data pull complete');
+    return { products, items, workers, parties };
+  }
+
+  // ── Dispatch push (Phase DE) ───────────────────────────────────────────
+
+  async pushDispatchesCycle(): Promise<void> {
+    if (this.dispatchSyncRunning) return;
+    if (!this.client.isConfigured) return;
+
+    this.dispatchSyncRunning = true;
+    try {
+      await this.pushPendingDispatches();
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      logger.error({ error }, 'Dispatch push cycle error');
+    } finally {
+      this.dispatchSyncRunning = false;
+    }
+  }
+
+  private async pushPendingDispatches(): Promise<void> {
+    const docs = this.queries.listPendingDispatchDocs(5);
+    if (docs.length === 0) return;
+
+    logger.info({ count: docs.length }, '[dispatch-sync] Pushing pending dispatch docs to Django');
+
+    for (const doc of docs) {
+      await this.pushOneDispatch(doc);
+    }
+  }
+
+  private async pushOneDispatch(doc: DispatchDoc): Promise<void> {
+    this.queries.markDispatchDocSyncing(doc.doc_id);
+    const lines = this.queries.getDispatchLinesByDoc(doc.doc_id);
+
+    try {
+      const resp = await this.client.pushDispatch({
+        idempotency_key: doc.idempotency_key ?? doc.doc_id,
+        entry_date:      doc.entry_date,
+        truck_no:        doc.truck_no,
+        customer_id:     doc.customer_id,
+        customer_name:   doc.customer_name,
+        location:        doc.location,
+        shift:           doc.shift_id,
+        delay_reason:    doc.delay_reason,
+        lines:           lines.map(l => ({
+          qr_code:          l.qr_code,
+          bag_id:           l.bag_id,
+          pack_name:        l.pack_name,
+          pack_config_id:   l.pack_config_id,
+          item_id:          l.item_id,
+          actual_weight_gm: l.actual_weight_gm,
+          source:           l.source,
+          scanned_at:       l.scanned_at,
+        })),
+      });
+
+      this.queries.markDispatchDocSynced(doc.doc_id, resp.doc_id, resp.doc_no);
+      this.queries.setMeta('last_dispatch_sync_at', new Date().toISOString());
+
+      logger.info(
+        { docNo: doc.doc_no, djangoDocId: resp.doc_id, djangoDocNo: resp.doc_no },
+        resp.idempotent
+          ? '[dispatch-sync] Already on server — marked SYNCED (idempotent)'
+          : '[dispatch-sync] Dispatch pushed to Django',
+      );
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+
+      // 4xx = bad data / rejected permanently; 5xx or network = transient, retry
+      const is4xx = /push-dispatch failed: 4\d\d/.test(error);
+
+      if (is4xx) {
+        this.queries.markDispatchDocFailed(doc.doc_id, error);
+        logger.error(
+          { docNo: doc.doc_no, error },
+          '[dispatch-sync] Dispatch permanently failed (4xx) — manual fix required',
+        );
+      } else {
+        this.queries.revertDispatchDocToPending(doc.doc_id, error);
+        logger.warn(
+          { docNo: doc.doc_no, error },
+          '[dispatch-sync] Dispatch push failed (transient) — will retry next cycle',
+        );
+      }
+    }
+  }
+
+  // ── Party master pull (Phase DE — BLOCKED pending Django endpoint) ─────
+  // GET /api/station/party-masters/ does NOT exist on Django yet.
+  // Add that endpoint (Phase DD-bis), then call this from pullMasterData()
+  // using Promise.allSettled alongside fetchPackConfigs / fetchWorkerMasters.
+  async pullPartyMasters(): Promise<number> {
+    if (!this.client.isConfigured) return 0;
+
+    try {
+      const parties = await this.client.fetchPartyMasters();
+      this.queries.replacePartyMasters(parties);
+      logger.info({ count: parties.length }, 'Party masters updated');
+      return parties.length;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      logger.error({ error }, 'Failed to fetch party masters');
+      return 0;
+    }
   }
 }

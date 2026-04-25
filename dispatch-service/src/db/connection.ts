@@ -22,20 +22,51 @@ export function initDb(dbPath: string): Database.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
-  // Verify dispatch tables exist (migration v8 must have run)
-  const tables = (db.prepare(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('dispatch_doc','dispatch_line','party_master')"
-  ).all() as { name: string }[]).map(r => r.name);
+  return db;
+}
 
-  if (tables.length < 3) {
-    throw new Error(
-      `Dispatch tables missing (found: ${tables.join(',')}). ` +
-      'Ensure sync-service has run migration v8 (Phase DA) at least once.'
+/**
+ * Poll until all three dispatch tables exist (created by sync-service migration v8).
+ *
+ * dispatch-service starts at the same time as sync-service; on first boot the
+ * migrations may not have run yet.  We retry with a 2s interval for up to
+ * maxWaitMs (default 30s) before giving up — enough time for sync-service to
+ * open the DB, run migrations v1-v9, and close its transaction.
+ */
+export async function waitForDispatchTables(
+  openedDb: Database.Database,
+  maxWaitMs = 30_000,
+): Promise<void> {
+  const pollMs   = 2_000;
+  const deadline = Date.now() + maxWaitMs;
+
+  const check = () =>
+    (openedDb.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('dispatch_doc','dispatch_line','party_master')"
+    ).all() as { name: string }[]).map(r => r.name);
+
+  let found = check();
+
+  while (found.length < 3) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error(
+        `Dispatch tables still missing after ${maxWaitMs / 1000}s ` +
+        `(found: ${found.join(',') || 'none'}). ` +
+        'Ensure sync-service has run migration v8 (Phase DA) at least once.',
+      );
+    }
+
+    logger.warn(
+      { found, remainingSec: Math.round(remaining / 1000) },
+      '[dispatch] Tables not ready — waiting for sync-service migrations…',
     );
+
+    await new Promise<void>(resolve => setTimeout(resolve, pollMs));
+    found = check();
   }
 
-  logger.info('SQLite ready — dispatch tables confirmed');
-  return db;
+  logger.info({ tables: found }, 'SQLite ready — dispatch tables confirmed');
 }
 
 export function closeDb(): void {
