@@ -164,7 +164,7 @@ jobs:
         shell: pwsh
 
       # ── 10. Verify output ─────────────────────────────────────────────────────
-      - name: Verify installer size
+      - name: Verify installer and confirm asset path
         run: |
           $exe = "installer\Output\SmartWeightSetup.exe"
           if (-not (Test-Path $exe)) { throw "Installer not found: $exe" }
@@ -172,9 +172,13 @@ jobs:
           Write-Host "Installer size: $sizeMB MB"
           if ($sizeMB -lt 30) { throw "Installer suspiciously small ($sizeMB MB) — check bundling" }
           Write-Host "Installer verified OK: $exe ($sizeMB MB)"
+          # Confirm exact filename for release asset (must be SmartWeightSetup.exe exactly)
+          $name = Split-Path $exe -Leaf
+          Write-Host "Release asset filename: $name"
+          if ($name -ne 'SmartWeightSetup.exe') { throw "Unexpected filename: $name" }
         shell: pwsh
 
-      # ── 11. Upload as workflow artifact (every build) ─────────────────────────
+      # ── 11. Upload as workflow artifact (every build — available even without a release) ──
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -182,7 +186,12 @@ jobs:
           path: installer/Output/SmartWeightSetup.exe
           retention-days: 30
 
-      # ── 12. Create GitHub Release (tagged builds only) ─────────────────────────
+      # ── 12. Create GitHub Release and attach .exe (tagged builds only) ─────────
+      # IMPORTANT: The 'files:' path must exactly match the ISCC output location.
+      # setup.iss has OutputDir=Output (relative to installer/) → installer/Output/
+      # prerelease = true only when tag contains '-' (test/RC tags).
+      # Stable tags like v1.0.0 (no hyphen) produce STABLE releases, enabling:
+      #   https://.../releases/latest/download/SmartWeightSetup.exe
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
