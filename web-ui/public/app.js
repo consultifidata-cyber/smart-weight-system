@@ -57,11 +57,31 @@ function weightApp() {
     // ── Phase G: last master sync timestamp ──
     lastMasterSyncAt: null,
 
+    // ── Phase H: readiness gate ──
+    systemReady:        false,
+    systemReadyChecked: false,
+    systemReadyIssues:  [],
+    _readinessRetryId:  null,
+
+    // ── Phase H: shift checklist ──
+    shiftConfirmed:     false,
+    shiftChecks:        { printer: false, scale: false, internet: false },
+
+    // ── Phase H: data safety indicator (sync health) ──
+    syncHealth: 'unknown',   // 'green' | 'yellow' | 'red' | 'unknown'
+
+    // ── Phase H: panic button ──
+    generatingReport: false,
+
+    // ── Phase H: training mode ──
+    trainingMode: false,
+
     // ── Timers ──
     _weightPollId: null,
     _healthPollId: null,
     _autoResetId: null,
     _syncStatusPollId: null,
+    _syncHealthPollId: null,
 
     // ══════════════════════════════════════════════════════════════
     // Init / Destroy
@@ -86,12 +106,27 @@ function weightApp() {
         var w2 = localStorage.getItem('selectedWorker2');
         if (w2) this.selectedWorker2 = w2;
       } catch (e) { /* ignore */ }
+
+      // Phase H: restore training mode preference
+      try {
+        if (localStorage.getItem('trainingMode') === '1') this.trainingMode = true;
+      } catch (e) { /* ignore */ }
+
+      // Phase H: shift checklist — resets each page-load (sessionStorage)
+      try {
+        if (sessionStorage.getItem('shiftConfirmed')) this.shiftConfirmed = true;
+      } catch (e) { /* ignore */ }
+
+      // Phase H: start readiness check
+      this.checkSystemReady();
     },
 
     destroy() {
       clearInterval(this._weightPollId);
       clearInterval(this._healthPollId);
       clearInterval(this._syncStatusPollId);
+      clearInterval(this._syncHealthPollId);
+      clearTimeout(this._readinessRetryId);
       clearTimeout(this._autoResetId);
     },
 
@@ -193,6 +228,158 @@ function weightApp() {
       setTimeout(function () { self.refreshing = false; }, 1500);
     },
 
+    // ══════════════════════════════════════════════════════════════
+    // Phase H — Readiness Gate
+    // ══════════════════════════════════════════════════════════════
+
+    // Checks printer + scale connected + master data loaded.
+    // Polls every 10s until ready, then stops.
+    checkSystemReady() {
+      var self = this;
+      this._doReadinessCheck().then(function () {
+        if (!self.systemReady) {
+          self._readinessRetryId = setTimeout(function () {
+            self.checkSystemReady();
+          }, 10000);
+        }
+      });
+    },
+
+    async _doReadinessCheck() {
+      var issues = [];
+      try {
+        var res  = await this._fetchWithTimeout(CONFIG.printServiceUrl + '/system/status', {}, 5000);
+        var data = await res.json();
+        if (data.printer && data.printer.state !== 'connected') {
+          issues.push('PRINTER NOT CONNECTED');
+        }
+        if (data.scale && !data.scale.connected && !data.scale.simulate) {
+          issues.push('SCALE NOT CONNECTED');
+        }
+      } catch (e) {
+        issues.push('SYSTEM SERVICES NOT RESPONDING');
+      }
+      if (this.products.length === 0) issues.push('PRODUCT LIST NOT LOADED');
+      if (this.workers.length === 0)  issues.push('WORKER LIST NOT LOADED');
+
+      this.systemReadyIssues  = issues;
+      this.systemReady        = issues.length === 0;
+      this.systemReadyChecked = true;
+    },
+
+    // Force override (supervisor unlocks even if not all checks pass)
+    proceedAnyway() {
+      this.systemReady        = true;
+      this.systemReadyIssues  = [];
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // Phase H — Shift Start Checklist
+    // ══════════════════════════════════════════════════════════════
+
+    get shiftAllChecked() {
+      return this.shiftChecks.printer && this.shiftChecks.scale && this.shiftChecks.internet;
+    },
+
+    confirmShift() {
+      if (!this.shiftAllChecked) return;
+      this.shiftConfirmed = true;
+      try { sessionStorage.setItem('shiftConfirmed', '1'); } catch (e) { /* ignore */ }
+    },
+
+    // Pre-fill checklist from actual hardware status
+    autoFillChecklist() {
+      this.shiftChecks.printer  = this.printerConnected;
+      this.shiftChecks.scale    = this.weightStatus === 'ok';
+      this.shiftChecks.internet = this.syncConnected;
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // Phase H — Data Safety Indicator (sync health)
+    // ══════════════════════════════════════════════════════════════
+
+    _pollSyncHealth() {
+      var self = this;
+      this._fetchWithTimeout(CONFIG.syncServiceUrl + '/sync/status')
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          var lastSync = data.last_sync_at;
+          var pending  = (data.pending_sessions || 0) + (data.pending_entries || 0);
+
+          if (!lastSync && pending === 0) {
+            // No syncs yet but nothing pending — likely fresh install, OK
+            self.syncHealth = 'green';
+            return;
+          }
+
+          var ageMs = lastSync ? Date.now() - new Date(lastSync).getTime() : Infinity;
+
+          if (ageMs < 2 * 60 * 1000 || (ageMs < 5 * 60 * 1000 && pending === 0)) {
+            self.syncHealth = 'green';
+          } else if (ageMs < 15 * 60 * 1000) {
+            self.syncHealth = 'yellow';
+          } else {
+            self.syncHealth = 'red';
+          }
+        })
+        .catch(function () { self.syncHealth = 'red'; });
+    },
+
+    get syncHealthClass() {
+      return {
+        'sync-health-green':   this.syncHealth === 'green',
+        'sync-health-yellow':  this.syncHealth === 'yellow',
+        'sync-health-red':     this.syncHealth === 'red',
+        'sync-health-unknown': this.syncHealth === 'unknown',
+      };
+    },
+
+    get syncHealthText() {
+      if (this.syncHealth === 'green')   return '● LIVE SYNC';
+      if (this.syncHealth === 'yellow')  return '● SYNCING…';
+      if (this.syncHealth === 'red')     return '● SYNC STOPPED';
+      return '● SYNC UNKNOWN';
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // Phase H — Panic Button (Download Report)
+    // ══════════════════════════════════════════════════════════════
+
+    async generateReport() {
+      if (this.generatingReport) return;
+      this.generatingReport = true;
+      try {
+        var res = await this._fetchWithTimeout(
+          'http://localhost:3000/ops/report',
+          { method: 'POST' },
+          40000
+        );
+        var data = await res.json();
+        if (data.status === 'ok') {
+          alert('✓ Support report saved.\n\nFile: ' + data.path + '\n\nSend this file to support.');
+        } else {
+          throw new Error(data.error || 'unknown error');
+        }
+      } catch (e) {
+        alert(
+          '⚠ Could not auto-generate report.\n\n' +
+          'Run manually (as Administrator):\n' +
+          'powershell -File "C:\\SmartWeightSystem\\tools\\health-report.ps1"'
+        );
+      } finally {
+        this.generatingReport = false;
+      }
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // Phase H — Training Mode
+    // ══════════════════════════════════════════════════════════════
+
+    toggleTrainingMode() {
+      this.trainingMode = !this.trainingMode;
+      try { localStorage.setItem('trainingMode', this.trainingMode ? '1' : '0'); } catch (e) { /* ignore */ }
+    },
+
     // ── Phase G: fetch last master sync timestamp from sync status ──────────
     _fetchSyncStatus() {
       var self = this;
@@ -229,11 +416,14 @@ function weightApp() {
       var self = this;
       this.pollWeight();
       this.pollHealth();
-      this._weightPollId    = setInterval(function () { self.pollWeight(); }, CONFIG.weightPollMs);
-      this._healthPollId    = setInterval(function () { self.pollHealth(); }, CONFIG.healthPollMs);
+      this._weightPollId     = setInterval(function () { self.pollWeight(); }, CONFIG.weightPollMs);
+      this._healthPollId     = setInterval(function () { self.pollHealth(); }, CONFIG.healthPollMs);
       // Phase G: poll sync status every 2 minutes to keep lastMasterSyncAt fresh
       this._syncStatusPollId = setInterval(function () { self._fetchSyncStatus(); }, 120000);
-      this._fetchSyncStatus();  // initial fetch on startup
+      this._fetchSyncStatus();
+      // Phase H: poll sync health every 30 seconds for the safety indicator
+      this._syncHealthPollId = setInterval(function () { self._pollSyncHealth(); }, 30000);
+      this._pollSyncHealth();
     },
 
     pollWeight() {

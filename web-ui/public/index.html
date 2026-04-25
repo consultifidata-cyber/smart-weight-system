@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <!-- Phase F: removed user-scalable=no — workers can zoom if needed -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart Weight System</title>
   <link rel="stylesheet" href="style.css">
@@ -11,7 +10,7 @@
 
   <div class="app" x-data="weightApp()" x-init="init()" @unload.window="destroy()">
 
-    <!-- Phase F: Full-screen error modal (print failures + critical sync errors) -->
+    <!-- ── Phase F: Full-screen print error modal ───────────────────────────── -->
     <div class="error-modal" x-show="errorModal.show" x-cloak>
       <div class="error-modal-box">
         <div class="error-modal-title" x-text="errorModal.title"></div>
@@ -19,17 +18,73 @@
         <div class="error-modal-actions">
           <button class="error-modal-retry-btn"
             x-show="errorModal.showRetry"
-            @click="retryPrint(); dismissErrorModal()">
-            RETRY PRINT
-          </button>
-          <button class="error-modal-dismiss-btn" @click="dismissErrorModal()">
-            CLOSE
+            @click="retryPrint(); dismissErrorModal()">RETRY PRINT</button>
+          <button class="error-modal-dismiss-btn" @click="dismissErrorModal()">CLOSE</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Phase H: System Not Ready overlay ────────────────────────────────── -->
+    <div class="system-gate" x-show="systemReadyChecked && !systemReady" x-cloak>
+      <div class="system-gate-box">
+        <div class="system-gate-icon">⚠</div>
+        <div class="system-gate-title">SYSTEM NOT READY</div>
+        <div class="system-gate-subtitle">CALL SUPERVISOR</div>
+        <div class="system-gate-issues">
+          <template x-for="issue in systemReadyIssues" :key="issue">
+            <div class="system-gate-issue" x-text="issue"></div>
+          </template>
+        </div>
+        <div class="system-gate-retry">
+          <button class="system-gate-retry-btn" @click="checkSystemReady()">↻ Retry</button>
+          <!-- Supervisor override — hold 3 seconds -->
+          <button class="system-gate-override-btn" @click="proceedAnyway()">
+            Supervisor Override
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Status Bar (Phase F: larger badges, clearer labels) -->
+    <!-- ── Phase H: Shift Start Checklist ───────────────────────────────────── -->
+    <div class="shift-gate" x-show="systemReady && !shiftConfirmed" x-cloak>
+      <div class="shift-gate-box">
+        <div class="shift-gate-title">SHIFT START CHECK</div>
+        <div class="shift-gate-subtitle">Confirm before starting production</div>
+        <div class="shift-gate-checks">
+          <label class="shift-check-item">
+            <input type="checkbox" x-model="shiftChecks.printer">
+            <span class="shift-check-icon">🖨</span>
+            <span class="shift-check-label">Label printer is ON and ready</span>
+          </label>
+          <label class="shift-check-item">
+            <input type="checkbox" x-model="shiftChecks.scale">
+            <span class="shift-check-icon">⚖</span>
+            <span class="shift-check-label">Weighing scale is ON and stable</span>
+          </label>
+          <label class="shift-check-item">
+            <input type="checkbox" x-model="shiftChecks.internet">
+            <span class="shift-check-icon">🌐</span>
+            <span class="shift-check-label">Internet / server is reachable</span>
+          </label>
+        </div>
+        <button class="shift-start-btn"
+          :disabled="!shiftAllChecked"
+          :class="{ 'shift-start-ready': shiftAllChecked }"
+          @click="confirmShift()">
+          ✓ START SHIFT
+        </button>
+        <button class="shift-skip-btn" @click="autoFillChecklist()">Auto-detect status</button>
+      </div>
+    </div>
+
+    <!-- ── Phase H: Sync health banner (RED only — always visible when bad) ─── -->
+    <div class="sync-health-banner"
+      x-show="syncHealth === 'red'"
+      x-cloak>
+      ⚠  LIVE SYNC STOPPED — DATA MAY NOT BE REACHING SERVER.  Tap ⟳ Refresh or call supervisor.
+    </div>
+
+    <!-- ── Status Bar ─────────────────────────────────────────────────────────── -->
     <div class="status-bar">
       <div class="status-item station-id">
         <strong x-text="CONFIG.stationId"></strong>
@@ -42,20 +97,31 @@
           :class="printerConnected ? 'status-connected' : 'status-disconnected'"
           x-text="printerStatusText"></span>
       </div>
+      <!-- Phase H: data safety indicator -->
       <div class="status-item">
-        <span class="status-badge"
-          :class="syncConnected ? 'status-connected' : 'status-disconnected'"
-          x-text="syncStatusText"></span>
+        <span class="sync-health-badge" :class="syncHealthClass" x-text="syncHealthText"></span>
+      </div>
+      <!-- Phase H: training mode + panic button grouped at right -->
+      <div class="status-item ops-group">
+        <button class="training-toggle"
+          :class="{ active: trainingMode }"
+          @click="toggleTrainingMode()"
+          title="Toggle training hints">?</button>
+        <button class="report-btn"
+          :disabled="generatingReport"
+          @click="generateReport()"
+          title="Download support report">
+          <span x-text="generatingReport ? '…' : '⚡'"></span>
+        </button>
       </div>
     </div>
 
-    <!-- Today's bag counter + Refresh button -->
+    <!-- ── Today's bag counter + Refresh ─────────────────────────────────────── -->
     <div class="today-bar">
       <div class="today-total">
         <span class="bags-number" x-text="totalBagsToday"></span>
         <span class="bags-label">bags today</span>
       </div>
-      <!-- Phase G: refresh + last-synced indicator -->
       <div class="refresh-group">
         <button class="refresh-btn"
           :disabled="refreshing"
@@ -64,11 +130,10 @@
           title="Pull latest workers and products from server">
           <span x-text="refreshing ? 'Refreshing…' : '⟳ Refresh'"></span>
         </button>
-        <!-- Last synced: shows HH:MM, yellow if >10 min, red if never -->
         <div class="sync-stamp"
           :class="{
-            'sync-stale':  masterSyncAgeMin !== null && masterSyncAgeMin > 10,
-            'sync-never':  masterSyncAgeMin === null
+            'sync-stale': masterSyncAgeMin !== null && masterSyncAgeMin > 10,
+            'sync-never': masterSyncAgeMin === null
           }">
           <span class="sync-label">Synced:</span>
           <span x-text="lastMasterSyncDisplay"></span>
@@ -77,13 +142,12 @@
       </div>
     </div>
 
-    <!-- Main area -->
+    <!-- ── Main area ──────────────────────────────────────────────────────────── -->
     <div class="main-area">
 
-      <!-- Phase F: Recent panel — shows item + weight + time for each recent bag -->
+      <!-- Recent Products Panel -->
       <div class="recent-panel">
         <div class="recent-panel-title">Recent</div>
-
         <template x-for="(p, idx) in recentProducts" :key="p.pack_id">
           <button
             class="recent-btn"
@@ -97,7 +161,6 @@
             </span>
           </button>
         </template>
-
         <div class="recent-empty" x-show="recentProducts.length === 0">No recent</div>
       </div>
 
@@ -112,6 +175,10 @@
           </div>
           <div class="weight-status" x-text="weightLabel"></div>
         </div>
+        <!-- Phase H: training hint -->
+        <div class="training-hint" x-show="trainingMode">
+          Place bag on scale and wait for "✓ Stable — Ready to Print"
+        </div>
 
         <!-- Product Selector -->
         <div class="select-wrapper">
@@ -119,13 +186,15 @@
             :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
             <option value="">— Select Product —</option>
             <template x-for="p in products" :key="p.pack_id">
-              <option
-                :value="p.pack_id"
+              <option :value="p.pack_id"
                 x-text="p.name + (p.net_weight_gm ? ' (' + p.net_weight_gm + 'g)' : '')"
               ></option>
             </template>
           </select>
           <span class="select-arrow">&#9662;</span>
+        </div>
+        <div class="training-hint" x-show="trainingMode">
+          Select the product being packed today
         </div>
 
         <!-- Worker Selectors -->
@@ -136,7 +205,8 @@
               :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
               <option value="">— Worker 1 * —</option>
               <template x-for="w in workers" :key="w.worker_code">
-                <option :value="w.worker_code" x-text="w.worker_name + ' (' + w.worker_code + ')'"></option>
+                <option :value="w.worker_code"
+                  x-text="w.worker_name + ' (' + w.worker_code + ')'"></option>
               </template>
             </select>
             <span class="select-arrow">&#9662;</span>
@@ -147,14 +217,18 @@
               :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'">
               <option value="">— Worker 2 —</option>
               <template x-for="w in filteredWorkers2" :key="w.worker_code">
-                <option :value="w.worker_code" x-text="w.worker_name + ' (' + w.worker_code + ')'"></option>
+                <option :value="w.worker_code"
+                  x-text="w.worker_name + ' (' + w.worker_code + ')'"></option>
               </template>
             </select>
             <span class="select-arrow">&#9662;</span>
           </div>
         </div>
+        <div class="training-hint" x-show="trainingMode">
+          Worker 1 is required. Worker 2 is optional (second packer on the line).
+        </div>
 
-        <!-- Phase F: Last Bag prominently displayed -->
+        <!-- Last Bag prominently displayed -->
         <div class="last-bag-row" x-show="lastBag" x-transition>
           <div class="last-bag-card">
             <div class="last-bag-header">Last Printed</div>
@@ -165,12 +239,9 @@
               <span x-text="lastBag ? '  #' + lastBag.bag_number : ''"></span>
             </div>
           </div>
-          <!-- Phase F: bigger reprint button -->
           <button class="reprint-btn"
             :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'"
-            @click="reprintLast()">
-            ↻ Reprint
-          </button>
+            @click="reprintLast()">↻ Reprint</button>
         </div>
 
         <div class="spacer"></div>
@@ -188,6 +259,9 @@
           @click="state === 'PRINT_FAILED' ? retryPrint() : doPrint()"
           x-text="printButtonText"
         ></button>
+        <div class="training-hint training-hint-print" x-show="trainingMode">
+          Press PRINT only when the weight shows ✓ Stable and all fields above are selected
+        </div>
 
       </div><!-- /.main-col -->
     </div><!-- /.main-area -->

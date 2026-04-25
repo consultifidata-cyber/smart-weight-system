@@ -33,6 +33,306 @@ html, body {
   -webkit-user-select: none;
 }
 
+/* ── Phase H: System Not Ready overlay ─────────────────────────────────────── */
+
+.system-gate {
+  position: fixed;
+  inset: 0;
+  background: #1c1917;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.system-gate-box {
+  text-align: center;
+  max-width: 420px;
+  width: 100%;
+}
+
+.system-gate-icon {
+  font-size: 4rem;
+  margin-bottom: 12px;
+}
+
+.system-gate-title {
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: #fca5a5;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.system-gate-subtitle {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #fbbf24;
+  margin-bottom: 24px;
+}
+
+.system-gate-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.system-gate-issue {
+  padding: 12px 20px;
+  background: #450a0a;
+  border: 2px solid #dc2626;
+  border-radius: 10px;
+  color: #fca5a5;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.system-gate-retry {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+
+.system-gate-retry-btn {
+  padding: 14px 32px;
+  font-size: 1.2rem;
+  font-weight: 700;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  width: 100%;
+  max-width: 300px;
+}
+
+.system-gate-override-btn {
+  padding: 10px 24px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  background: transparent;
+  color: rgba(255,255,255,0.4);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* ── Phase H: Shift Start Checklist ────────────────────────────────────────── */
+
+.shift-gate {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.shift-gate-box {
+  background: var(--color-card);
+  border-radius: 20px;
+  padding: 32px 28px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+}
+
+.shift-gate-title {
+  font-size: 1.7rem;
+  font-weight: 900;
+  color: var(--color-primary);
+  margin-bottom: 6px;
+}
+
+.shift-gate-subtitle {
+  font-size: 1rem;
+  color: var(--color-text-light);
+  margin-bottom: 24px;
+}
+
+.shift-gate-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 28px;
+  text-align: left;
+}
+
+.shift-check-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  user-select: none;
+}
+
+.shift-check-item:has(input:checked) {
+  border-color: var(--color-stable);
+  background: #f0fdf4;
+}
+
+.shift-check-item input[type="checkbox"] {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--color-stable);
+}
+
+.shift-check-icon { font-size: 1.5rem; }
+
+.shift-check-label {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text);
+  flex: 1;
+}
+
+.shift-start-btn {
+  width: 100%;
+  padding: 18px;
+  font-size: 1.4rem;
+  font-weight: 800;
+  border: none;
+  border-radius: 14px;
+  background: var(--color-disabled);
+  color: white;
+  cursor: not-allowed;
+  transition: background 0.2s;
+  margin-bottom: 10px;
+}
+
+.shift-start-btn.shift-start-ready {
+  background: var(--color-stable);
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
+}
+
+.shift-start-btn.shift-start-ready:active {
+  transform: scale(0.98);
+}
+
+.shift-skip-btn {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 4px;
+}
+
+/* ── Phase H: Sync health banner (RED only) ─────────────────────────────────── */
+
+.sync-health-banner {
+  background: #450a0a;
+  border-bottom: 3px solid var(--color-error);
+  color: #fca5a5;
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 10px 20px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+/* ── Phase H: Sync health badge in status bar ────────────────────────────────── */
+
+.sync-health-badge {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: white;
+  white-space: nowrap;
+}
+
+.sync-health-badge.sync-health-green   { background: var(--color-stable); }
+.sync-health-badge.sync-health-yellow  { background: var(--color-settling); color: #1c1917; }
+.sync-health-badge.sync-health-red     { background: var(--color-error); animation: pulse-red 2s infinite; }
+.sync-health-badge.sync-health-unknown { background: var(--color-disabled); }
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.7; }
+}
+
+/* ── Phase H: ops group (training + panic button) ───────────────────────────── */
+
+.ops-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.training-toggle {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  background: white;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text-light);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.training-toggle.active {
+  background: #fef9c3;
+  border-color: #ca8a04;
+  color: #ca8a04;
+}
+
+.report-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 2px solid #fca5a5;
+  background: #fff1f2;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.report-btn:hover:not(:disabled) { background: #ffe4e6; }
+.report-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Phase H: Training hints ────────────────────────────────────────────────── */
+
+.training-hint {
+  padding: 7px 12px;
+  background: #fefce8;
+  border: 1px solid #fde047;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: #713f12;
+  margin-top: -4px;
+}
+
+.training-hint-print {
+  margin-top: 6px;
+}
+
 /* ── Phase F: full-screen error modal ───────────────────────────────────────── */
 
 [x-cloak] { display: none !important; }

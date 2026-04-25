@@ -445,6 +445,93 @@ process.on('SIGTERM', shutdown);
 process.on('SIGHUP',  shutdown);
 process.on('SIGBREAK', shutdown); // Windows Ctrl+C in some terminals
 
+// ── Phase H: Daily SQLite auto-backup ────────────────────────────────────────
+// Backs up fg_production.db daily at midnight, keeps last 7 copies.
+
+const DB_BACKUP_DIR       = path.join(root, 'logs', 'db-backups');
+const DB_BACKUP_KEEP      = 7;
+const DB_SOURCE           = path.join(root, 'sync-service', 'data', 'fg_production.db');
+
+function backupDatabase() {
+  if (!fs.existsSync(DB_SOURCE)) return;
+  try {
+    if (!fs.existsSync(DB_BACKUP_DIR)) fs.mkdirSync(DB_BACKUP_DIR, { recursive: true });
+    const ts  = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    const dst = path.join(DB_BACKUP_DIR, `fg_production_${ts}.db`);
+    fs.copyFileSync(DB_SOURCE, dst);
+    log(`[backup] Database backed up → ${path.basename(dst)}`);
+
+    // Prune: keep only the last N backups
+    const files = fs.readdirSync(DB_BACKUP_DIR)
+      .filter(f => f.startsWith('fg_production_') && f.endsWith('.db'))
+      .sort();
+    if (files.length > DB_BACKUP_KEEP) {
+      files.slice(0, files.length - DB_BACKUP_KEEP).forEach(f => {
+        try { fs.unlinkSync(path.join(DB_BACKUP_DIR, f)); } catch { /* ignore */ }
+      });
+    }
+  } catch (e) {
+    log(`[backup] Database backup failed: ${e.message}`);
+  }
+}
+
+function scheduleDaily(fn, label) {
+  // Run immediately on startup, then every 24 hours
+  fn();
+
+  // Schedule next run at the next midnight
+  const now  = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1, 0);
+  const msToMidnight = next - now;
+
+  setTimeout(() => {
+    fn();
+    setInterval(fn, 24 * 60 * 60 * 1000);
+    log(`[scheduler] ${label} running on 24h schedule`);
+  }, msToMidnight);
+
+  log(`[scheduler] ${label} next run in ${Math.round(msToMidnight / 60000)} min`);
+}
+
+// ── Phase H: Auto health report every 4 hours ────────────────────────────────
+
+const HEALTH_REPORT_INTERVAL_MS = 4 * 60 * 60 * 1000;  // 4 hours
+const HEALTH_REPORT_AUTO_DIR    = path.join(root, 'logs', 'health-reports');
+const HEALTH_REPORT_SCRIPT      = path.join(root, 'tools', 'health-report.ps1');
+const HEALTH_REPORT_KEEP        = 5;
+
+function runAutoHealthReport() {
+  if (process.platform !== 'win32') return;
+  if (!fs.existsSync(HEALTH_REPORT_SCRIPT)) return;
+
+  try {
+    if (!fs.existsSync(HEALTH_REPORT_AUTO_DIR)) {
+      fs.mkdirSync(HEALTH_REPORT_AUTO_DIR, { recursive: true });
+    }
+  } catch { return; }
+
+  const { execSync } = require('child_process');
+  try {
+    execSync(
+      `powershell -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "${HEALTH_REPORT_SCRIPT}" -AutoReport -OutputDir "${HEALTH_REPORT_AUTO_DIR}"`,
+      { timeout: 45000, stdio: 'ignore', windowsHide: true }
+    );
+
+    // Prune old auto-reports
+    const files = fs.readdirSync(HEALTH_REPORT_AUTO_DIR)
+      .filter(f => f.endsWith('.zip'))
+      .sort();
+    if (files.length > HEALTH_REPORT_KEEP) {
+      files.slice(0, files.length - HEALTH_REPORT_KEEP).forEach(f => {
+        try { fs.unlinkSync(path.join(HEALTH_REPORT_AUTO_DIR, f)); } catch { /* ignore */ }
+      });
+    }
+    log(`[health-report] Auto report saved to ${HEALTH_REPORT_AUTO_DIR}`);
+  } catch (e) {
+    log(`[health-report] Auto report failed (non-fatal): ${e.message}`);
+  }
+}
+
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 // Ensure logs directory exists (before openLauncherLog)
@@ -480,6 +567,13 @@ log('========================================');
 
 // Start HTTP health endpoint
 startHealthServer();
+
+// Phase H: daily auto-backup of SQLite database
+scheduleDaily(backupDatabase, 'DB backup');
+
+// Phase H: auto health report every 4 hours (Windows only, non-fatal)
+runAutoHealthReport();
+setInterval(runAutoHealthReport, HEALTH_REPORT_INTERVAL_MS);
 
 // Start all services
 apps.forEach(startApp);

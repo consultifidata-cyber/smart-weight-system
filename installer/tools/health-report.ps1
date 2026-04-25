@@ -19,18 +19,30 @@
     powershell -ExecutionPolicy Bypass -File "C:\SmartWeightSystem\tools\health-report.ps1"
 #>
 param(
-    [string]$InstallDir = 'C:\SmartWeightSystem',
-    [int]   $HealthPort = 5099
+    [string]$InstallDir  = 'C:\SmartWeightSystem',
+    [int]   $HealthPort  = 5099,
+    # Phase H: AutoReport saves to logs/health-reports/ instead of Desktop.
+    # Used by launcher.js for scheduled 4-hourly reports.
+    [switch]$AutoReport,
+    [string]$OutputDir   = ''
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
-$timestamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
-$reportDir  = "$env:TEMP\SWS-Report-$timestamp"
-$zipDest    = "$env:USERPROFILE\Desktop\SWS-HealthReport-$timestamp.zip"
-$logsDir    = Join-Path $InstallDir 'logs'
+$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$reportDir = "$env:TEMP\SWS-Report-$timestamp"
+$logsDir   = Join-Path $InstallDir 'logs'
+
+# Determine zip destination
+if ($AutoReport -or $OutputDir) {
+    $destDir = if ($OutputDir) { $OutputDir } else { Join-Path $logsDir 'health-reports' }
+    if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force $destDir | Out-Null }
+    $zipDest = Join-Path $destDir "SWS-HealthReport-$timestamp.zip"
+} else {
+    $zipDest = "$env:USERPROFILE\Desktop\SWS-HealthReport-$timestamp.zip"
+}
 
 New-Item -ItemType Directory -Force $reportDir | Out-Null
-Write-Host "Collecting diagnostics into $reportDir ..."
+if (-not $AutoReport) { Write-Host "Collecting diagnostics into $reportDir ..." }
 
 # ── 1. System info ─────────────────────────────────────────────────────────────
 Write-Host '  system info...'
@@ -257,13 +269,18 @@ Compress-Archive -Path "$reportDir\*" -DestinationPath $zipDest -Force
 # Cleanup temp
 Remove-Item $reportDir -Recurse -Force -ErrorAction SilentlyContinue
 
-Write-Host ''
-Write-Host '=================================================' -ForegroundColor Cyan
-Write-Host "  Support report saved to Desktop:" -ForegroundColor Green
-Write-Host "  $zipDest" -ForegroundColor White
-Write-Host '  Send this file to support.' -ForegroundColor Green
-Write-Host '=================================================' -ForegroundColor Cyan
-Write-Host ''
-
-# Open the Desktop folder so the user can find the zip
-Start-Process explorer.exe $env:USERPROFILE\Desktop
+if (-not $AutoReport) {
+    Write-Host ''
+    Write-Host '=================================================' -ForegroundColor Cyan
+    Write-Host "  Support report saved:" -ForegroundColor Green
+    Write-Host "  $zipDest" -ForegroundColor White
+    Write-Host '  Send this file to support.' -ForegroundColor Green
+    Write-Host '=================================================' -ForegroundColor Cyan
+    Write-Host ''
+    # Open the folder so the user can find the zip
+    $zipFolder = Split-Path $zipDest -Parent
+    Start-Process explorer.exe $zipFolder
+} else {
+    # AutoReport: just print path for launcher to capture
+    Write-Host $zipDest
+}
