@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import logger from '../utils/logger.js';
 import { generateBagIdempotencyKey } from '../sync/idempotency.js';
 
-const LATEST_VERSION = 7;
+const LATEST_VERSION = 8;
 
 const migrations: Record<number, (db: Database.Database) => void> = {
   // Version 0 → 1: Core entry tables
@@ -216,6 +216,97 @@ const migrations: Record<number, (db: Database.Database) => void> = {
         WHERE synced = 0
     `);
     logger.info('Migration 7: fg_bag.sync_attempts and last_sync_error added');
+  },
+
+  // ── Version 7 → 8: Dispatch module (Phase DA) ──────────────────────────────
+  // Adds three new tables for offline truck-load dispatch.
+  // ZERO impact on existing tables — purely additive.
+  // dispatch_doc  : one row per truck loading event
+  // dispatch_line : one row per scanned bag in a dispatch
+  // party_master  : cache of Django PartyMaster (customers) for dispatch entry
+  8: (db) => {
+    db.exec(`
+      -- ── Party master cache (pulled from Django like workers/pack configs) ──
+      CREATE TABLE IF NOT EXISTS party_master (
+        party_id    INTEGER PRIMARY KEY,
+        party_name  TEXT NOT NULL,
+        party_code  TEXT,
+        gst_no      TEXT,
+        city        TEXT,
+        updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      -- ── Dispatch document (one per truck loading) ─────────────────────────
+      CREATE TABLE IF NOT EXISTS dispatch_doc (
+        doc_id          TEXT PRIMARY KEY,                      -- UUID generated locally
+        doc_no          TEXT NOT NULL UNIQUE,                  -- DSP-260426-001
+        entry_date      TEXT NOT NULL,                         -- YYYY-MM-DD
+        truck_no        TEXT NOT NULL,                         -- MH-12-AB-1234
+        customer_id     INTEGER,                               -- PartyMaster.pk (set after sync)
+        customer_name   TEXT NOT NULL,                         -- display name from party cache
+        location        TEXT,                                  -- source warehouse / location
+        plant_id        TEXT NOT NULL,                         -- local plant code
+        shift_id        TEXT,                                  -- A / B / C
+        delay_reason    TEXT,
+        status          TEXT NOT NULL DEFAULT 'DRAFT',         -- DRAFT | CLOSED | DECLINED
+        sync_status     TEXT NOT NULL DEFAULT 'LOCAL',         -- LOCAL | PENDING | SYNCING | SYNCED | FAILED
+        idempotency_key TEXT UNIQUE,                           -- sha256 for safe retry push to Django
+        total_bags      INTEGER NOT NULL DEFAULT 0,            -- incremented on each scan
+        total_weight_gm REAL    NOT NULL DEFAULT 0,            -- summed from dispatch_line
+        created_at      TEXT NOT NULL,
+        closed_at       TEXT,
+        django_doc_id   INTEGER,                               -- Django TruckLoad.pk after sync
+        django_doc_no   TEXT,                                  -- Django TruckLoad.doc_no after sync
+        sync_error      TEXT,
+        last_sync_at    TEXT
+      );
+
+      -- ── Dispatch line (one row per scanned bag) ────────────────────────────
+      CREATE TABLE IF NOT EXISTS dispatch_line (
+        line_id          TEXT PRIMARY KEY,                     -- UUID generated locally
+        doc_id           TEXT NOT NULL
+                           REFERENCES dispatch_doc(doc_id)
+                           ON DELETE CASCADE,
+        qr_code          TEXT NOT NULL,                        -- scanned from label
+        bag_id           TEXT,                                 -- fg_bag.bag_id (null = external scan)
+        pack_name        TEXT,                                 -- from fg_bag JOIN fg_pack_config
+        pack_config_id   INTEGER,
+        item_id          INTEGER,
+        actual_weight_gm REAL,                                 -- from fg_bag (for weight totals)
+        source           TEXT NOT NULL DEFAULT 'LOCAL',        -- LOCAL | EXTERNAL (not in fg_bag)
+        scanned_at       TEXT NOT NULL,
+        synced           INTEGER NOT NULL DEFAULT 0,           -- 0 | 1
+        django_line_id   INTEGER,                              -- Django scan line PK after sync
+        UNIQUE(doc_id, qr_code)                                -- same QR cannot appear twice in same dispatch
+      );
+    `);
+
+    // Indexes (separate exec so SQLite runs them one at a time)
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_dispatch_doc_status
+        ON dispatch_doc(status, sync_status);
+
+      CREATE INDEX IF NOT EXISTS idx_dispatch_doc_date
+        ON dispatch_doc(entry_date);
+
+      CREATE INDEX IF NOT EXISTS idx_dispatch_doc_plant
+        ON dispatch_doc(plant_id, entry_date);
+
+      CREATE INDEX IF NOT EXISTS idx_dispatch_line_doc
+        ON dispatch_line(doc_id);
+
+      CREATE INDEX IF NOT EXISTS idx_dispatch_line_qr
+        ON dispatch_line(qr_code);
+
+      CREATE INDEX IF NOT EXISTS idx_dispatch_line_unsynced
+        ON dispatch_line(synced)
+        WHERE synced = 0;
+
+      CREATE INDEX IF NOT EXISTS idx_party_master_name
+        ON party_master(party_name);
+    `);
+
+    logger.info('Migration 8: dispatch_doc, dispatch_line, party_master tables created (Phase DA)');
   },
 };
 
