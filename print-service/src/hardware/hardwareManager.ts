@@ -66,7 +66,8 @@ async function checkWindowsHealth(printerName: string): Promise<boolean> {
       `powershell -NonInteractive -NoProfile -Command "(Get-Printer -Name '${safeN}').PrinterStatus"`,
       { timeout: 3000 },
     );
-    return stdout.trim() === 'Normal';
+    const s = stdout.trim();
+    return s === 'Normal' || s === 'Idle' || s === 'Ready' || s === 'Printing';
   } catch {
     return false;
   }

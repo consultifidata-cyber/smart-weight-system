@@ -225,7 +225,10 @@ export class TSPLDriver implements PrinterDriver {
         `powershell -Command "(Get-Printer -Name '${this.printerName}').PrinterStatus"`,
         { timeout: timeoutMs },
       );
-      return stdout.trim() === 'Normal';
+      // 'Normal' = printing/just-printed. 'Idle' = ready and waiting.
+      // Both mean the printer is connected and usable.
+      const s = stdout.trim();
+      return s === 'Normal' || s === 'Idle' || s === 'Ready' || s === 'Printing';
     } catch {
       return false;
     }
