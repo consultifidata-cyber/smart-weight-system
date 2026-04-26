@@ -784,8 +784,12 @@ begin
     'WEIGHT_SERVICE_URL=http://localhost:5000' + #13#10 +
     'LAUNCHER_HEALTH_PORT=5099' + #13#10;
 
+  // SaveStringToFile writes ANSI (Windows code page). For our ASCII-only
+  // .env content, ANSI = UTF-8 (no BOM, no null bytes). This is intentional
+  // — do NOT change to a PowerShell Set-Content call, which defaults to
+  // UTF-16 LE with BOM on PowerShell 5.1. dotenv cannot parse that.
   SaveStringToFile(EnvPath, Content, False);
-  Log('.env written: ' + EnvPath);
+  Log('.env written (ANSI=UTF-8 no BOM): ' + EnvPath);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

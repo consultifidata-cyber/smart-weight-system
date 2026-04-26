@@ -23,9 +23,23 @@ import logger from '../utils/logger.js';
 export async function createDriver(config: PrinterConfig): Promise<PrinterDriver> {
   const { driver, device, labelWidth, labelHeight, dpi } = config;
 
-  // ── Startup diagnostic — log every relevant value so production logs are
-  // self-contained and unambiguous. This is the first thing to check when
-  // the printer shows red.
+  // ── Startup diagnostic — log effective config AND raw env bytes.
+  // Raw bytes catch BOM / encoding artifacts that make string comparison
+  // silently fail (e.g. PowerShell Set-Content writes UTF-16 LE with BOM;
+  // dotenv reads it as UTF-8 → PRINT_MODE gets null bytes or BOM prefix).
+  const rawMode = process.env.PRINT_MODE ?? '';
+  const isClean = rawMode === rawMode.trim().replace(/^﻿/, '');
+  if (!isClean || (rawMode !== '' && rawMode.trim().toUpperCase() !== 'WINDOWS' && rawMode.trim().toUpperCase() !== 'RAW_DIRECT')) {
+    logger.warn(
+      {
+        rawHex: Buffer.from(rawMode).toString('hex').substring(0, 40),
+        rawLen: rawMode.length,
+        parsed: config.printMode,
+      },
+      'PRINT_MODE has unexpected characters — possible .env encoding issue (BOM / CRLF / whitespace)',
+    );
+  }
+
   logger.info(
     {
       printMode:        config.printMode,

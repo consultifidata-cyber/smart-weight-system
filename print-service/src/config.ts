@@ -6,8 +6,18 @@ import type { PrinterConfig } from './types.js';
 // fallback resolves from cwd (service dir) up one level to project root.
 dotenvConfig({ path: process.env.DOTENV_PATH || resolve(process.cwd(), '..', '.env') });
 
-const rawPrintMode = (process.env.PRINT_MODE || 'WINDOWS').toUpperCase();
-const rawInterface = (process.env.PRINTER_INTERFACE || 'USB').toUpperCase();
+// Normalize before comparison: strip UTF-8/UTF-16 BOM (﻿), trim
+// whitespace, uppercase. This defends against .env files written with
+// BOM (PowerShell Set-Content default), trailing \r from Windows CRLF,
+// or leading/trailing spaces. Without trim, " WINDOWS" !== "WINDOWS".
+// Default is 'WINDOWS' — the only supported production mode. Cascade
+// requires explicit PRINT_MODE=RAW_DIRECT opt-in.
+function normalizeEnvStr(val: string | undefined, fallback: string): string {
+  return (val ?? '').replace(/^﻿/, '').trim().toUpperCase() || fallback;
+}
+
+const rawPrintMode = normalizeEnvStr(process.env.PRINT_MODE, 'WINDOWS');
+const rawInterface = normalizeEnvStr(process.env.PRINTER_INTERFACE, 'USB');
 
 const config: PrinterConfig = Object.freeze({
   driver: process.env.PRINTER_DRIVER || 'tspl',
