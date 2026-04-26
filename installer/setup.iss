@@ -689,6 +689,17 @@ begin
   PrinterIface := GetSelectedPrinterIface;
   ScalePort    := GetSelectedScalePort;
 
+  // When user types manually, GetSelectedPrinterIface returns 'USB' by default.
+  // Override to 'WINDOWS' unless the path is a raw USB class device (\\.\USBPRINxx)
+  // or a COM port (USB-CDC serial printer). This covers the common case where
+  // the operator types the printer name or the FullName::ShareName format.
+  if (PrinterIface = 'USB') and (PrinterPath <> '') then begin
+    if (Pos('::', PrinterPath) > 0) or
+       ((Pos('\\', PrinterPath) <> 1) and
+        (Uppercase(Copy(PrinterPath, 1, 3)) <> 'COM')) then
+      PrinterIface := 'WINDOWS';
+  end;
+
   // Safe defaults (match print-service built-in defaults)
   PrintMode      := 'WINDOWS';
   PrinterDevice  := 'TVSLP46NEO';

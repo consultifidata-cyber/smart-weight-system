@@ -72,7 +72,8 @@ function weightApp() {
     systemReady:        false,
     systemReadyChecked: false,
     systemReadyIssues:  [],
-    _systemStartupRetry: 0,   // silent retries before showing error gate
+    systemChecking:     false,  // true while a readiness check is in flight
+    _systemStartupRetry: 0,
     _readinessRetryId:  null,
 
     // ── Phase H: shift checklist ──
@@ -279,6 +280,7 @@ function weightApp() {
     },
 
     async _doReadinessCheck() {
+      this.systemChecking = true;
       var issues = [];
 
       // ── Print service + hardware status ──────────────────────────────────
@@ -306,6 +308,7 @@ function weightApp() {
       this.systemReadyIssues  = issues;
       this.systemReady        = issues.length === 0;
       this.systemReadyChecked = true;
+      this.systemChecking     = false;
     },
 
     // Force override (supervisor unlocks even if not all checks pass)

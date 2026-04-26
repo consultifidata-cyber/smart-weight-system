@@ -148,14 +148,18 @@
       <div class="system-gate-box">
         <div class="system-gate-icon">⚠</div>
         <div class="system-gate-title">SYSTEM NOT READY</div>
-        <div class="system-gate-subtitle">Fix the issue below, then tap Retry</div>
+        <div class="system-gate-subtitle" x-text="systemChecking ? 'Checking — please wait…' : 'Fix the issue below, then tap Retry'"></div>
         <div class="system-gate-issues">
           <template x-for="issue in systemReadyIssues" :key="issue">
             <div class="system-gate-issue" x-text="issue"></div>
           </template>
         </div>
         <div class="system-gate-retry">
-          <button class="system-gate-retry-btn" @click="checkSystemReady()">↻ Retry</button>
+          <button class="system-gate-retry-btn"
+            :disabled="systemChecking"
+            @click="checkSystemReady()"
+            x-text="systemChecking ? '↻ Checking…' : '↻ Retry'">
+          </button>
         </div>
       </div>
     </div>
