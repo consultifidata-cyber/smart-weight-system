@@ -16,6 +16,7 @@ var CONFIG = {
   printResetTimeoutMs:  20000,
   printLockMs:      2000,    // Phase F: double-click lock duration
   enableBeep:       true,    // Phase F: Web Audio beep on success/failure
+  supervisorPin:    '1234',  // 4-digit PIN for gate override — change in .env / config.js
 };
 
 

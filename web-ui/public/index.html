@@ -1,4 +1,4 @@
-<!-- BUILD_V2_1_5 -->
+<!-- BUILD_V2_2_0_RC1 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -108,6 +108,39 @@
       </div><!-- /.wsm-box -->
     </div>
 
+    <!-- ── Print confirmation toast ─────────────────────────────────────────── -->
+    <div class="print-toast" x-show="printToast.show" x-cloak x-transition
+         @click="dismissPrintToast()">
+      <span class="print-toast-icon">✓</span>
+      <span class="print-toast-msg" x-text="printToast.msg"></span>
+    </div>
+
+    <!-- ── Reconnecting inline banner (brief blip, not full gate) ────────────── -->
+    <div class="reconnecting-banner" x-show="systemBlipping" x-cloak>
+      ↻ Reconnecting…
+    </div>
+
+    <!-- ── Supervisor PIN override modal ────────────────────────────────────── -->
+    <div class="pin-overlay" x-show="pinModal.show" x-cloak
+         @keydown.escape.window="closePinModal()"
+         @click.self="closePinModal()">
+      <div class="pin-box">
+        <div class="pin-title">Supervisor Override</div>
+        <div class="pin-subtitle">Enter 4-digit PIN to bypass readiness check</div>
+        <input type="password" inputmode="numeric" maxlength="4"
+          class="pin-input"
+          x-model="pinModal.input"
+          @keydown.enter="tryPinOverride()"
+          placeholder="• • • •"
+          autofocus>
+        <div class="pin-error" x-show="pinModal.error" x-text="pinModal.error"></div>
+        <div class="pin-actions">
+          <button class="pin-cancel-btn" @click="closePinModal()">Cancel</button>
+          <button class="pin-confirm-btn" @click="tryPinOverride()">Confirm</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Print error modal ─────────────────────────────────────────────────── -->
     <div class="error-modal" x-show="errorModal.show" x-cloak>
       <div class="error-modal-box">
@@ -121,25 +154,36 @@
       </div>
     </div>
 
-    <!-- ── Workers info / lookup panel ──────────────────────────────────────── -->
-    <div class="workers-panel" x-show="workerPanelOpen" x-cloak>
-      <div class="workers-panel-header">
-        <span>👷 All Workers</span>
-        <button class="workers-panel-close" @click="workerPanelOpen = false">✕ Close</button>
-      </div>
-      <div class="workers-panel-list">
-        <template x-for="w in workers" :key="w.worker_code">
-          <div class="worker-info-row"
-            :class="{ selected: selectedWorker1 === w.worker_code }"
-            @click="selectWorkerCode(w.worker_code, false); workerPanelOpen = false">
-            <span class="worker-info-code" x-text="w.worker_code"></span>
-            <span class="worker-info-name" x-text="w.worker_name"></span>
-            <span class="worker-info-shift" x-show="w.shift" x-text="'Shift ' + w.shift"></span>
-            <span class="worker-info-tick" x-show="selectedWorker1 === w.worker_code">✓</span>
+    <!-- ── Workers modal popup ───────────────────────────────────────────────── -->
+    <div class="workers-modal-overlay" x-show="workerPanelOpen" x-cloak
+         @click.self="workerPanelOpen = false"
+         @keydown.escape.window="workerPanelOpen = false">
+      <div class="workers-panel">
+        <div class="workers-panel-header">
+          <span>👷 Select Worker</span>
+          <button class="workers-panel-close" @click="workerPanelOpen = false">✕</button>
+        </div>
+        <div class="workers-search-row">
+          <input type="text" class="workers-search-input"
+            x-model="workerSearch"
+            placeholder="Type to filter…"
+            @input=""
+            autofocus>
+        </div>
+        <div class="workers-panel-list">
+          <template x-for="w in workers.filter(function(w){ return !workerSearch || w.worker_code.toLowerCase().includes(workerSearch.toLowerCase()) || w.worker_name.toLowerCase().includes(workerSearch.toLowerCase()) })" :key="w.worker_code">
+            <div class="worker-info-row"
+              :class="{ selected: selectedWorker1 === w.worker_code }"
+              @click="selectWorkerCode(w.worker_code, false); workerPanelOpen = false; workerSearch = ''">
+              <span class="worker-info-code" x-text="w.worker_code"></span>
+              <span class="worker-info-name" x-text="w.worker_name"></span>
+              <span class="worker-info-shift" x-show="w.shift" x-text="'Shift ' + w.shift"></span>
+              <span class="worker-info-tick" x-show="selectedWorker1 === w.worker_code">✓</span>
+            </div>
+          </template>
+          <div x-show="workers.length === 0" class="workers-empty">
+            No workers loaded. Tap Refresh to load from server.
           </div>
-        </template>
-        <div x-show="workers.length === 0" class="workers-empty">
-          No workers loaded. Tap Refresh to load from server.
         </div>
       </div>
     </div>
@@ -160,6 +204,9 @@
             :disabled="systemChecking"
             @click="checkSystemReady()"
             x-text="systemChecking ? '↻ Checking…' : '↻ Retry'">
+          </button>
+          <button class="system-gate-pin-btn" @click="openPinOverride()">
+            Supervisor Override
           </button>
         </div>
       </div>
@@ -225,21 +272,14 @@
         </div>
       </div>
 
-      <!-- Dispatch link -->
-      <a href="/dispatch/" class="dispatch-nav-link">📦 Dispatch</a>
-
-      <!-- Workers button + ops buttons -->
+      <!-- Workers button + training toggle -->
       <div class="sbar-ops">
-        <button class="workers-btn" @click="workerPanelOpen = true"
-          title="View all workers">
+        <button class="workers-btn" @click="workerPanelOpen = true; workerSearch = ''"
+          title="Select worker">
           👷 Workers
         </button>
         <button class="training-toggle" :class="{ active: trainingMode }"
           @click="toggleTrainingMode()" title="Training hints">?</button>
-        <button class="report-btn" :disabled="generatingReport"
-          @click="generateReport()" title="Download support report">
-          <span x-text="generatingReport ? '…' : '⚡'"></span>
-        </button>
       </div>
     </div>
 
@@ -278,10 +318,6 @@
             :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'"
             @click="selectRecentProduct(p.pack_id)">
             <span class="recent-name" x-text="p.name"></span>
-            <span class="recent-meta" x-show="p.weight_kg">
-              <span x-text="p.weight_kg ? p.weight_kg + ' kg' : ''"></span>
-              <span x-show="p.time" x-text="' · ' + p.time"></span>
-            </span>
           </button>
         </template>
         <div class="recent-empty" x-show="recentProducts.length === 0">No recent</div>

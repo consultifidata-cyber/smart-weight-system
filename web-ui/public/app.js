@@ -35,6 +35,7 @@ function weightApp() {
     pinnedWorkerCodes: [],   // max 15 codes, ORDER IS STABLE
     workerLastUsed:   {},    // { code: timestamp } — for eviction decisions
     workerPanelOpen:  false, // worker info/lookup panel
+    workerSearch:     '',    // type-ahead filter in worker modal
     wsModal: { show: false, date: '', shift: '', loading: false, data: null, error: '', stale: false, printing: false, printDone: false },
     _healthPollFails: 0,   // consecutive /print/health failures before flipping dot red
 
@@ -75,7 +76,13 @@ function weightApp() {
     systemReadyIssues:  [],
     systemChecking:     false,  // true while a readiness check is in flight
     _systemStartupRetry: 0,
-    _readinessRetryId:  null,
+    _readinessRetryId:  null,      // kept for backward compat — unused with new monitor
+    _readinessMonitorId: null,     // setInterval for continuous readiness monitoring
+    _systemLastOkAt:    0,         // epoch ms of last successful readiness check
+    _consecutiveReadinessFailures: 0,
+    systemBlipping:     false,     // true = brief blip, show inline toast only
+    printToast:         { show: false, msg: '' },
+    pinModal:           { show: false, input: '', error: '' },
 
     // ── Phase H: shift checklist ──
     shiftConfirmed:     false,
@@ -139,8 +146,8 @@ function weightApp() {
         if (sessionStorage.getItem('shiftConfirmed')) this.shiftConfirmed = true;
       } catch (e) { /* ignore */ }
 
-      // Phase H: start readiness check
-      this.checkSystemReady();
+      // Start continuous readiness monitor (5 s interval, hysteresis)
+      this.startReadinessMonitor();
     },
 
     destroy() {
@@ -148,6 +155,7 @@ function weightApp() {
       clearInterval(this._healthPollId);
       clearInterval(this._syncStatusPollId);
       clearInterval(this._syncHealthPollId);
+      clearInterval(this._readinessMonitorId);
       clearTimeout(this._readinessRetryId);
       clearTimeout(this._autoResetId);
     },
@@ -251,31 +259,57 @@ function weightApp() {
     },
 
     // ══════════════════════════════════════════════════════════════
-    // Phase H — Readiness Gate
+    // ══════════════════════════════════════════════════════════════
+    // Readiness Gate — hysteresis + continuous monitoring
     // ══════════════════════════════════════════════════════════════
 
-    // Checks printer + scale connected + master data loaded.
-    // Polls every 10s until ready, then stops.
+    // Starts a continuous 5s monitor. Brief failures show inline
+    // "Reconnecting..." banner. Persistent failures (≥3 failures AND
+    // ≥20s since last good check) show the full-screen gate.
+    startReadinessMonitor() {
+      var self = this;
+      this.checkSystemReady();
+      if (this._readinessMonitorId) clearInterval(this._readinessMonitorId);
+      this._readinessMonitorId = setInterval(function () {
+        self.checkSystemReady();
+      }, 5000);
+    },
+
     checkSystemReady() {
       var self = this;
       this._doReadinessCheck().then(function () {
         if (self.systemReady) {
-          self._systemStartupRetry = 0;
+          // System is healthy — record timestamp and reset counters
+          self._systemLastOkAt = Date.now();
+          self._consecutiveReadinessFailures = 0;
+          self._systemStartupRetry = 6;  // skip grace period on future checks
+          self.systemReadyChecked = false;  // hide gate
+          self.systemBlipping     = false;  // hide inline toast
           return;
         }
-        // First 30 seconds: retry silently every 5s without showing the error gate.
-        // Devices are connected — services just need a moment to initialise.
-        // Only show the error overlay after 6 silent retries (~30s).
+
+        self._consecutiveReadinessFailures++;
+
+        // Grace period: first ~30s after startup — silent retries, show nothing
         if (self._systemStartupRetry < 6) {
           self._systemStartupRetry++;
-          self.systemReadyChecked = false;   // keep gate hidden during grace period
-          setTimeout(function () { self.checkSystemReady(); }, 5000);
+          self.systemReadyChecked = false;
+          self.systemBlipping     = false;
+          return;
+        }
+
+        // Past grace period: decide between blip and persistent failure
+        var secSinceOk = self._systemLastOkAt > 0
+          ? (Date.now() - self._systemLastOkAt) / 1000 : Infinity;
+
+        if (self._consecutiveReadinessFailures < 3 || secSinceOk < 20) {
+          // Brief blip — inline toast only, DO NOT show full-screen gate
+          self.systemBlipping     = true;
+          self.systemReadyChecked = false;
         } else {
-          // Grace period exhausted — show the error so operator can act
+          // Persistent failure — show full-screen gate
+          self.systemBlipping     = false;
           self.systemReadyChecked = true;
-          self._readinessRetryId = setTimeout(function () {
-            self.checkSystemReady();
-          }, 10000);
         }
       });
     },
@@ -289,33 +323,50 @@ function weightApp() {
         var res  = await this._fetchWithTimeout(CONFIG.printServiceUrl + '/system/status', {}, 5000);
         var data = await res.json();
         if (data.printer && data.printer.state !== 'connected') {
-          issues.push('Label printer not ready — power it ON and check USB cable, then Retry');
+          issues.push('Label printer not ready — power it ON and check the USB cable.');
         }
-        if (data.scale && !data.scale.connected && !data.scale.simulate) {
-          issues.push('Scale not responding — check USB-serial cable and power, then Retry');
+        // P1.1 fix: use data.scale.state (not data.scale.connected)
+        if (data.scale && data.scale.state !== 'connected' && !data.scale.simulate) {
+          issues.push('Weight machine not sending data. Check the cable behind the laptop is plugged in firmly.');
         }
       } catch (e) {
-        issues.push('Print service not reachable (port 5001) — services may still be starting, wait 30s then Retry');
+        issues.push('Printer software is starting up. Wait 30 seconds, then tap Retry.');
       }
 
       // ── Sync service — products and workers from Django ───────────────────
       if (this.products.length === 0) {
-        issues.push('Product list empty — sync service not connected to server, check .env DJANGO_SERVER_URL');
+        issues.push('Product list not loaded. Check internet connection to office server, then tap Retry.');
       }
       if (this.workers.length === 0) {
-        issues.push('Worker list empty — check DJANGO_API_TOKEN in .env and server connection');
+        issues.push('Worker list not loaded. Tell supervisor to check internet, then tap Retry.');
       }
 
-      this.systemReadyIssues  = issues;
-      this.systemReady        = issues.length === 0;
-      this.systemReadyChecked = true;
-      this.systemChecking     = false;
+      this.systemReadyIssues = issues;
+      this.systemReady       = issues.length === 0;
+      this.systemChecking    = false;
+      // Note: systemReadyChecked and systemBlipping are set by checkSystemReady()
     },
 
-    // Force override (supervisor unlocks even if not all checks pass)
-    proceedAnyway() {
-      this.systemReady        = true;
-      this.systemReadyIssues  = [];
+    // ── PIN override ──────────────────────────────────────────────
+    openPinOverride() {
+      this.pinModal = { show: true, input: '', error: '' };
+    },
+    closePinModal() {
+      this.pinModal.show = false;
+    },
+    tryPinOverride() {
+      var correct = String(CONFIG.supervisorPin || '1234');
+      if (this.pinModal.input === correct) {
+        this.systemReady        = true;
+        this.systemReadyChecked = false;
+        this.systemBlipping     = false;
+        this._systemLastOkAt    = Date.now();
+        this._consecutiveReadinessFailures = 0;
+        this.closePinModal();
+      } else {
+        this.pinModal.error = 'Wrong PIN — try again.';
+        this.pinModal.input = '';
+      }
     },
 
     // ══════════════════════════════════════════════════════════════
@@ -631,6 +682,13 @@ function weightApp() {
           if (printRes.ok && printData.status === 'ok') {
             this.state = 'PRINTED';
             this.errorMessage = null;
+            // Brief confirmation toast: product + weight + worker
+            this._showPrintToast(
+              (this.lastBag ? this.lastBag.pack_name : 'Label') + ' — ' +
+              (weightKg ? weightKg.toFixed(2) + ' kg' : '') +
+              (this.selectedWorker1 ? '  ·  ' + this.selectedWorker1 : '') +
+              '  ✓ printed'
+            );
             // Phase F: beep on success
             this._playBeep('success');
             var self = this;
@@ -663,6 +721,19 @@ function weightApp() {
     // ══════════════════════════════════════════════════════════════
     // Phase F: Full-screen error modal
     // ══════════════════════════════════════════════════════════════
+
+    _showPrintToast(msg) {
+      var self = this;
+      if (this._printToastTimer) clearTimeout(this._printToastTimer);
+      this.printToast = { show: true, msg: msg };
+      this._printToastTimer = setTimeout(function () {
+        self.printToast.show = false;
+      }, 3000);
+    },
+    dismissPrintToast() {
+      this.printToast.show = false;
+      if (this._printToastTimer) clearTimeout(this._printToastTimer);
+    },
 
     _showErrorModal(title, body, showRetry) {
       this.errorModal = { show: true, title: title, body: body, showRetry: !!showRetry };
