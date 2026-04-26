@@ -10,6 +10,100 @@
 
   <div class="app" x-data="weightApp()" x-init="init()" @unload.window="destroy()">
 
+    <!-- ── Worker Summary modal ──────────────────────────────────────────────── -->
+    <div class="wsm-overlay" x-show="wsModal.show" x-cloak
+         @click.self="closeWorkerSummaryModal()"
+         @keydown.escape.window="closeWorkerSummaryModal()">
+      <div class="wsm-box">
+
+        <!-- Header -->
+        <div class="wsm-header">
+          <span class="wsm-title">📊 Worker Summary</span>
+          <button class="wsm-close" @click="closeWorkerSummaryModal()">✕</button>
+        </div>
+
+        <!-- Controls -->
+        <div class="wsm-controls">
+          <div class="wsm-field">
+            <label class="wsm-label">Date</label>
+            <input type="date" class="wsm-date-input"
+              x-model="wsModal.date"
+              :max="new Date().toISOString().substring(0,10)"
+              @change="onWsParamChange()">
+          </div>
+          <div class="wsm-field">
+            <label class="wsm-label">Shift</label>
+            <div class="wsm-shift-radios">
+              <template x-for="s in ['A','B','C']" :key="s">
+                <label class="wsm-shift-lbl" :class="{ active: wsModal.shift === s }">
+                  <input type="radio" :value="s" x-model="wsModal.shift" @change="onWsParamChange()" style="display:none">
+                  <span x-text="s"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+          <button class="wsm-load-btn"
+            :disabled="wsModal.loading"
+            @click="loadWorkerSummaryPreview()">
+            <span x-show="wsModal.loading">Loading…</span>
+            <span x-show="!wsModal.loading && !wsModal.stale">Load Preview</span>
+            <span x-show="!wsModal.loading && wsModal.stale">⚠ Reload Preview</span>
+          </button>
+        </div>
+
+        <!-- Preview area -->
+        <div class="wsm-preview">
+
+          <!-- Error -->
+          <div class="wsm-error-msg" x-show="wsModal.error" x-text="wsModal.error"></div>
+
+          <!-- Empty -->
+          <div class="wsm-empty-msg"
+            x-show="!wsModal.loading && !wsModal.error && wsModal.data && wsModal.data.rows.length === 0">
+            No bags recorded for Shift <span x-text="wsModal.shift"></span> on <span x-text="wsModal.date"></span>.
+          </div>
+
+          <!-- Table -->
+          <div class="wsm-table" x-show="wsModal.data && wsModal.data.rows.length > 0">
+            <div class="wsm-th">
+              <span>Worker</span><span>Name</span><span>Item</span><span>Bags</span>
+            </div>
+            <template x-for="(r, idx) in wsDisplayRows" :key="idx">
+              <div :class="r.type === 'subtotal' ? 'wsm-subtotal-row' : 'wsm-data-row'">
+                <span x-show="r.type === 'row'"    x-text="r.worker_id"></span>
+                <span x-show="r.type === 'row'"    x-text="r.worker_name"></span>
+                <span x-show="r.type === 'row'"    x-text="r.item"></span>
+                <span x-show="r.type === 'subtotal'" class="wsm-subtotal-label" x-text="r.label"></span>
+                <span x-show="r.type === 'subtotal'" class="wsm-subtotal-bags"  x-text="r.bags"></span>
+              </div>
+            </template>
+            <div class="wsm-grand-row">
+              <span>GRAND TOTAL</span>
+              <span x-text="wsModal.data ? wsModal.data.grand_total : ''"></span>
+            </div>
+          </div>
+
+          <!-- Placeholder before first load -->
+          <div class="wsm-empty-msg"
+            x-show="!wsModal.loading && !wsModal.error && !wsModal.data">
+            Select date &amp; shift, then tap Load Preview.
+          </div>
+
+        </div><!-- /.wsm-preview -->
+
+        <!-- Actions -->
+        <div class="wsm-actions">
+          <button class="wsm-cancel-btn" @click="closeWorkerSummaryModal()">Cancel</button>
+          <button class="wsm-print-btn"
+            :disabled="!wsModal.data || wsModal.data.rows.length === 0 || wsModal.stale"
+            @click="printWorkerSummary()">
+            🖨 Print
+          </button>
+        </div>
+
+      </div><!-- /.wsm-box -->
+    </div>
+
     <!-- ── Print error modal ─────────────────────────────────────────────────── -->
     <div class="error-modal" x-show="errorModal.show" x-cloak>
       <div class="error-modal-box">
@@ -221,6 +315,9 @@
               x-show="selectedWorker1"
               x-text="selectedWorker1"></span>
             <span class="worker-required-hint" x-show="!selectedWorker1">* required</span>
+            <button class="wsm-open-btn" @click="openWorkerSummaryModal()" title="Print worker productivity summary">
+              📊 Summary
+            </button>
           </div>
 
           <!-- Pinned workers — BIG buttons, stable positions -->

@@ -35,6 +35,7 @@ function weightApp() {
     pinnedWorkerCodes: [],   // max 15 codes, ORDER IS STABLE
     workerLastUsed:   {},    // { code: timestamp } — for eviction decisions
     workerPanelOpen:  false, // worker info/lookup panel
+    wsModal: { show: false, date: '', shift: '', loading: false, data: null, error: '', stale: false },
 
     // ── Today's bag count ──
     totalBagsToday: 0,
@@ -947,6 +948,91 @@ function weightApp() {
       try { localStorage.setItem('pinnedWorkerCodes', JSON.stringify(this.pinnedWorkerCodes)); } catch (e) {}
       try { localStorage.setItem('workerLastUsed', JSON.stringify(this.workerLastUsed)); } catch (e) {}
       try { localStorage.setItem('selectedWorker1', code); } catch (e) {}
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Worker Productivity Summary modal
+    // ══════════════════════════════════════════════════════════════════════
+
+    // Flat list for the preview table: mixes 'row' and 'subtotal' entries
+    // so the template needs only a single x-for loop.
+    get wsDisplayRows() {
+      var m = this.wsModal;
+      if (!m.data || !m.data.rows || m.data.rows.length === 0) return [];
+      var subtotalMap = {};
+      (m.data.worker_subtotals || []).forEach(function (w) { subtotalMap[w.worker_id] = w.bags; });
+      var result = [];
+      var prev = null;
+      m.data.rows.forEach(function (row, i) {
+        if (prev !== null && row.worker_id !== prev) {
+          result.push({ type: 'subtotal', label: 'Subtotal', bags: subtotalMap[prev] || 0 });
+        }
+        result.push({ type: 'row', worker_id: row.worker_id, worker_name: row.worker_name, item: row.item, bags: row.bags });
+        prev = row.worker_id;
+        if (i === m.data.rows.length - 1) {
+          result.push({ type: 'subtotal', label: 'Subtotal', bags: subtotalMap[row.worker_id] || 0 });
+        }
+      });
+      return result;
+    },
+
+    _wsShiftForHour(h) {
+      if (h >= 6  && h < 14) return 'A';
+      if (h >= 14 && h < 22) return 'B';
+      return 'C';
+    },
+
+    openWorkerSummaryModal() {
+      var now   = new Date();
+      var h     = now.getHours();
+      var shift = this._wsShiftForHour(h);
+      var d;
+      // Shift C after midnight (00:00–05:59): shift started yesterday
+      if (h < 6) {
+        var yest = new Date(now);
+        yest.setDate(yest.getDate() - 1);
+        d = yest.toISOString().substring(0, 10);
+      } else {
+        d = now.toISOString().substring(0, 10);
+      }
+      this.wsModal = { show: true, date: d, shift: shift, loading: false, data: null, error: '', stale: false };
+    },
+
+    closeWorkerSummaryModal() {
+      this.wsModal.show = false;
+    },
+
+    async loadWorkerSummaryPreview() {
+      var m = this.wsModal;
+      m.loading = true;
+      m.error   = '';
+      m.data    = null;
+      m.stale   = false;
+      try {
+        var url = CONFIG.syncServiceUrl + '/bags/worker-summary?date=' + m.date + '&shift=' + m.shift;
+        var res = await this._fetchWithTimeout(url, {}, 8000);
+        var json = await res.json();
+        if (!res.ok) {
+          m.error = json.error || ('Server error ' + res.status);
+        } else {
+          m.data = json;
+        }
+      } catch (e) {
+        m.error = 'Could not reach sync service — is it running?';
+      } finally {
+        m.loading = false;
+      }
+    },
+
+    onWsParamChange() {
+      // Clear preview when date/shift changes after a successful load
+      if (this.wsModal.data) { this.wsModal.stale = true; }
+    },
+
+    printWorkerSummary() {
+      // Phase 2 stub — Phase 3 will format as TSPL and send to printer
+      console.log('[worker-summary] printing:', JSON.stringify(this.wsModal.data, null, 2));
+      alert('Phase 3 will wire this to the label printer.');
     },
 
     _fetchWithTimeout(url, options, timeoutMs) {
