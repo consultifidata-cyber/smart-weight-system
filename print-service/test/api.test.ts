@@ -1,7 +1,8 @@
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { createServer } from '../src/api/server.js';
+import { _resetForTest } from '../src/hardware/printerHealthCache.js';
 import type { PrinterDriver, PrinterConfig } from '../src/types.js';
 
 interface MockDriverOptions {
@@ -68,6 +69,11 @@ const mockConfig: PrinterConfig = {
 };
 
 describe('Print API', () => {
+  // Reset the health cache before each test so tests are isolated.
+  // /print/health now reads from the module-level cache (getCachedHealth)
+  // rather than calling driver.healthCheck() directly.
+  beforeEach(() => _resetForTest(true));
+
   it('POST /print/print returns 200 on success', async () => {
     const driver = new MockDriver();
     const app = createServer(driver, mockConfig);
@@ -197,6 +203,8 @@ describe('Print API', () => {
   });
 
   it('GET /health returns 503 when printer disconnected', async () => {
+    // Seed the cache as unhealthy — the endpoint reads from cache, not driver
+    _resetForTest(false);
     const driver = new MockDriver({ healthy: false });
     const app = createServer(driver, mockConfig);
 

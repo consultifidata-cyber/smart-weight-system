@@ -1,56 +1,49 @@
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import config from './config.js';
 import logger from './utils/logger.js';
 import { createDriver } from './drivers/index.js';
 import { createServer } from './api/server.js';
+import { startProbe, stopProbe } from './hardware/printerHealthCache.js';
+
+// ── Build version (read once at startup) ─────────────────────────────────────
+const __dir = dirname(fileURLToPath(import.meta.url));
+let VERSION = '2.1.5';
+try {
+  const pkg = JSON.parse(readFileSync(join(__dir, '../package.json'), 'utf8'));
+  VERSION = (pkg as { version?: string }).version ?? VERSION;
+} catch { /* use hardcoded fallback */ }
 
 async function main(): Promise<void> {
+  // This is the startup line the acceptance test grep's for:
+  // {"msg":"Service started","version":"2.1.5","printMode":"WINDOWS"}
   logger.info(
-    { stationId: config.stationId, driver: config.driver, device: config.device },
-    'Starting print service',
+    { version: VERSION, stationId: config.stationId, printMode: config.printMode, driver: config.driver },
+    'Service started',
   );
 
   try {
-    // Create printer driver (async in Phase 2 — may run USB auto-detection)
+    // Create printer driver (resolves adapter type, logs effective config)
     const driver = await createDriver(config);
 
-    // Health check on startup
-    let printerConnected = await driver.healthCheck();
-    if (!printerConnected) {
-      logger.warn({ device: config.device }, 'Printer not reachable on startup');
-    } else {
-      logger.info('Printer connected');
-    }
+    // Start background health probe — replaces the old 10s heartbeat.
+    // Probe runs every 30 s with 10 s timeout and 3-failure hysteresis.
+    // HTTP handlers (system/status, print/health) read the cached boolean
+    // instead of calling driver.healthCheck() on every request.
+    startProbe(driver);
 
     // Create and start Express server
     const app = createServer(driver, config);
 
     const server = app.listen(config.apiPort, () => {
-      logger.info({ port: config.apiPort }, 'Print service listening');
+      logger.info({ port: config.apiPort, version: VERSION }, 'Print service listening');
     });
 
-    // Hardware heartbeat — every 10 s (PRINT_HEALTH_POLL_MS).
-    // CascadingPrintAdapter.healthCheck() drives automatic recovery internally:
-    // if the current adapter fails it probes USBPRIN → libusb → COM and switches.
-    const healthPollId = setInterval(async () => {
-      try {
-        const nowConnected = await driver.healthCheck();
-        if (nowConnected !== printerConnected) {
-          const adapterInfo = (driver as any).adapter?.getInfo?.() ?? 'n/a';
-          if (nowConnected) {
-            logger.info({ adapter: adapterInfo }, 'Printer recovered');
-          } else {
-            logger.warn({ adapter: adapterInfo }, 'Printer unavailable — will retry next heartbeat');
-          }
-          printerConnected = nowConnected;
-        }
-      } catch { /* healthCheck must not throw */ }
-    }, config.healthPollMs);
-
     // Graceful shutdown: drain in-flight print requests before exit.
-    // Critical: aborting a TSPL buffer mid-stream can jam the printer.
     const shutdown = (signal: string): void => {
       logger.info({ signal }, 'Shutting down print service');
-      clearInterval(healthPollId);
+      stopProbe();
       server.close(() => {
         logger.info('Print service stopped');
         process.exit(0);
@@ -61,7 +54,7 @@ async function main(): Promise<void> {
       }, 8000);
     };
 
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGINT',  () => shutdown('SIGINT'));
     process.on('SIGTERM', () => shutdown('SIGTERM'));
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);

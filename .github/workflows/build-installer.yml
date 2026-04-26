@@ -174,7 +174,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed with exit code $LASTEXITCODE" }
         shell: pwsh
 
-      # ── 10. Verify output ─────────────────────────────────────────────────────
+      # ── 10. Build-time assertion — web-ui must contain build marker ──────────────
+      - name: Assert web-ui build marker present
+        run: |
+          $marker = "BUILD_V2_1_5"
+          $content = Get-Content "web-ui\public\index.html" -Raw
+          if ($content -notmatch [regex]::Escape($marker)) {
+            throw "web-ui/public/index.html is missing build marker '$marker' — stale bundle may have been used"
+          }
+          Write-Host "Build marker '$marker' confirmed in web-ui/public/index.html"
+        shell: pwsh
+
+      # ── 11. Verify output ─────────────────────────────────────────────────────
       - name: Verify installer and confirm asset path
         run: |
           $exe = "installer\Output\SmartWeightSetup.exe"

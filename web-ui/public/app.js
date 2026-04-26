@@ -36,6 +36,7 @@ function weightApp() {
     workerLastUsed:   {},    // { code: timestamp } — for eviction decisions
     workerPanelOpen:  false, // worker info/lookup panel
     wsModal: { show: false, date: '', shift: '', loading: false, data: null, error: '', stale: false, printing: false, printDone: false },
+    _healthPollFails: 0,   // consecutive /print/health failures before flipping dot red
 
     // ── Today's bag count ──
     totalBagsToday: 0,
@@ -496,9 +497,18 @@ function weightApp() {
       this._fetchWithTimeout(CONFIG.printServiceUrl + '/print/health')
         .then(function (res) { return res.json(); })
         .then(function (data) {
-          self.printerConnected = data.printer && data.printer.connected;
+          // Definitive response from service — trust it
+          self.printerConnected = !!(data.printer && data.printer.connected);
+          self._healthPollFails = 0;
         })
-        .catch(function () { self.printerConnected = false; });
+        .catch(function () {
+          // Network error or timeout — only flip dot red after 3 consecutive
+          // failures so a single slow response doesn't mislead the operator.
+          self._healthPollFails = (self._healthPollFails || 0) + 1;
+          if (self._healthPollFails >= 3) {
+            self.printerConnected = false;
+          }
+        });
 
       this._fetchWithTimeout(CONFIG.syncServiceUrl + '/health')
         .then(function (res) { return res.json(); })

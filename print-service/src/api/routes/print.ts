@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import type { PrinterDriver, PrintRequest, PrintResponse, HealthResponse, PrinterConfig } from '../../types.js';
+import { getCachedHealth, setIsPrinting } from '../../hardware/printerHealthCache.js';
 import logger from '../../utils/logger.js';
 
 // ── Worker Summary TSPL builder ───────────────────────────────────────────────
@@ -179,8 +180,13 @@ router.post('/print', async (req: Request, res: Response) => {
     // Build TSPL commands
     const commands = driver.buildLabel(labelData);
 
-    // Send to printer (with timeout — single attempt, client owns retry)
-    await driver.send(commands, config.sendTimeoutMs);
+    // Pause health probe during send — avoids competing with the spooler
+    setIsPrinting(true);
+    try {
+      await driver.send(commands, config.sendTimeoutMs);
+    } finally {
+      setTimeout(() => setIsPrinting(false), 2000);
+    }
 
     // Record this print request
     recentPrints.set(requestKey, Date.now());
@@ -214,11 +220,13 @@ router.post('/print', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/health', async (req: Request, res: Response) => {
-  const { driver, config } = req.ctx as { driver: PrinterDriver; config: any };
+router.get('/health', (req: Request, res: Response) => {
+  const { config } = req.ctx as { driver: PrinterDriver; config: any };
 
   try {
-    const connected = await driver.healthCheck();
+    // Read from background probe cache — O(1), never times out.
+    // The probe runs every 30 s with 3-failure hysteresis in printerHealthCache.ts.
+    const connected = getCachedHealth();
 
     const response: HealthResponse = {
       printer: {

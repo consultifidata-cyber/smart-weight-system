@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { getCachedHealth } from '../../hardware/printerHealthCache.js';
 import logger from '../../utils/logger.js';
 
 const router = Router();
@@ -23,18 +24,12 @@ const router = Router();
 router.get('/status', async (req: Request, res: Response) => {
   const { driver, config } = req.ctx;
 
-  // ── Printer state ──────────────────────────────────────────────────────────
-  // driver.healthCheck() delegates to CascadingPrintAdapter which handles
-  // recovery internally — safe to call on every request (cached + non-destructive)
-  let printerConnected = false;
-  let printerAdapter   = 'unknown';
+  // ── Printer state — read from background probe cache (O(1), never blocks) ──
+  // The probe runs every 30 s in index.ts and requires 3 consecutive failures
+  // before flipping to "unavailable". This endpoint never times out.
+  let printerConnected  = getCachedHealth();
+  let printerAdapter    = config.printMode;   // WINDOWS or RAW_DIRECT
   let printerRecovering = false;
-
-  try {
-    printerConnected  = await driver.healthCheck();
-    printerAdapter    = (driver as any).adapter?.getInfo?.() ?? config.printMode;
-    printerRecovering = (driver as any).adapter?.recovering === true;
-  } catch { /* treat as unavailable */ }
 
   const printerState =
     printerConnected  ? 'connected'   :

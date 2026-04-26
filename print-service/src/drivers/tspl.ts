@@ -219,7 +219,7 @@ export class TSPLDriver implements PrinterDriver {
    * Health check for Windows: query printer status via PowerShell Get-Printer.
    * Uses the full Windows printer name (e.g. "SNBC TVSE LP 46 NEO BPLE").
    */
-  async healthCheckWin(timeoutMs: number = 3000): Promise<boolean> {
+  async healthCheckWin(timeoutMs: number = 10_000): Promise<boolean> {
     try {
       const { stdout } = await execAsync(
         `powershell -Command "(Get-Printer -Name '${this.printerName}').PrinterStatus"`,
