@@ -12,7 +12,7 @@ dotenvConfig({ path: process.env.DOTENV_PATH || resolve(process.cwd(), '..', '.e
 // or leading/trailing spaces. Without trim, " WINDOWS" !== "WINDOWS".
 // Default is 'WINDOWS' — the only supported production mode. Cascade
 // requires explicit PRINT_MODE=RAW_DIRECT opt-in.
-function normalizeEnvStr(val: string | undefined, fallback: string): string {
+export function normalizeEnvStr(val: string | undefined, fallback: string): string {
   return (val ?? '').replace(/^﻿/, '').trim().toUpperCase() || fallback;
 }
 
