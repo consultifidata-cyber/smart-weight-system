@@ -15,7 +15,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/dispatch', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dispatch', 'index.html'));
 });
-app.get('/dispatch/*', (_req, res) => {
+app.get('/dispatch/*path', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dispatch', 'index.html'));
 });
 
