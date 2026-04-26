@@ -23,45 +23,65 @@ import logger from '../utils/logger.js';
 export async function createDriver(config: PrinterConfig): Promise<PrinterDriver> {
   const { driver, device, labelWidth, labelHeight, dpi } = config;
 
+  // ── Startup diagnostic — log every relevant value so production logs are
+  // self-contained and unambiguous. This is the first thing to check when
+  // the printer shows red.
+  logger.info(
+    {
+      printMode:        config.printMode,
+      printerInterface: config.printerInterface,
+      device:           config.device,
+      printerName:      config.printerName,
+      printerUsbDevice: config.printerUsbDevice || '(empty)',
+      printerComPort:   config.printerComPort   || '(empty)',
+    },
+    'Print driver init — effective config',
+  );
+
   let adapter: PrintAdapter | undefined;
 
-  if (config.printMode === 'RAW_DIRECT') {
+  // ── WINDOWS mode: use Windows print spooler — NO adapter, NO cascade.
+  // This branch is an explicit early path so the cascade block below is
+  // structurally unreachable when PRINT_MODE=WINDOWS. Any future refactor
+  // that accidentally removes this guard will fail the TypeScript type check
+  // because `adapter` is still `undefined` and TSPLDriver accepts that.
+  if (config.printMode !== 'RAW_DIRECT') {
+    logger.info({ mode: 'WINDOWS', device }, 'Windows spooler printer driver');
+    // adapter stays undefined → TSPLDriver routes to sendWin / healthCheckWin
+    return new TSPLDriver(device, labelWidth, labelHeight, dpi, config.printerName, undefined);
+  }
 
-    if (config.printerInterface === 'COM') {
-      // Explicit COM mode — USB-CDC printer on a specific serial port
-      if (!config.printerComPort) {
-        throw new Error(
-          'PRINTER_COM_PORT is required when PRINT_MODE=RAW_DIRECT and PRINTER_INTERFACE=COM',
-        );
-      }
-      adapter = new SerialPrintAdapter(config.printerComPort);
-      logger.info(
-        { mode: 'RAW_DIRECT', interface: 'COM', port: config.printerComPort },
-        'Driverless serial (USB-CDC) print adapter ready',
-      );
+  // ── RAW_DIRECT mode only below this point ────────────────────────────────
 
-    } else {
-      // USB mode — CascadingPrintAdapter handles USBPRIN → libusb → COM internally.
-      // Detection is lazy: probes on first use and re-probes on every healthCheck()
-      // call if the current adapter has failed (self-healing, 10 s heartbeat).
-      adapter = new CascadingPrintAdapter({
-        usbDevice: config.printerUsbDevice || undefined,
-        comPort:   config.printerComPort   || undefined,
-      });
-      logger.info(
-        {
-          mode:      'RAW_DIRECT',
-          interface: 'USB',
-          cascade:   'USBPRIN → libusb → COM',
-          usbDevice: config.printerUsbDevice || 'auto',
-          comPort:   config.printerComPort   || 'none',
-        },
-        'Self-healing cascading print adapter created',
+  if (config.printerInterface === 'COM') {
+    // Explicit COM mode — USB-CDC printer on a specific serial port
+    if (!config.printerComPort) {
+      throw new Error(
+        'PRINTER_COM_PORT is required when PRINT_MODE=RAW_DIRECT and PRINTER_INTERFACE=COM',
       );
     }
+    adapter = new SerialPrintAdapter(config.printerComPort);
+    logger.info(
+      { mode: 'RAW_DIRECT', interface: 'COM', port: config.printerComPort },
+      'Driverless serial (USB-CDC) print adapter ready',
+    );
 
   } else {
-    logger.info({ mode: 'WINDOWS', device }, 'Windows spooler printer driver');
+    // USB mode — CascadingPrintAdapter handles USBPRIN → libusb → COM internally.
+    adapter = new CascadingPrintAdapter({
+      usbDevice: config.printerUsbDevice || undefined,
+      comPort:   config.printerComPort   || undefined,
+    });
+    logger.info(
+      {
+        mode:      'RAW_DIRECT',
+        interface: 'USB',
+        cascade:   'USBPRIN → libusb → COM',
+        usbDevice: config.printerUsbDevice || 'auto',
+        comPort:   config.printerComPort   || 'none',
+      },
+      'Self-healing cascading print adapter created',
+    );
   }
 
   switch (driver.toLowerCase()) {
