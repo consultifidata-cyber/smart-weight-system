@@ -91,24 +91,35 @@ jobs:
         shell: pwsh
 
       # ── 6. Install NSSM and stage for installer bundle ───────────────────────
-      # nssm.cc is unreliable from CI — use Chocolatey (stable, cached on runner).
+      # IMPORTANT: Get-Command nssm returns the Chocolatey SHIM at
+      # C:\ProgramData\chocolatey\bin\nssm.exe — that shim looks for
+      # ..\..\lib\NSSM\tools\nssm.exe which only exists on the CI machine.
+      # We must copy the REAL binary from the lib folder, not the shim.
       - name: Install and stage NSSM
         run: |
           choco install nssm --yes --no-progress
 
-          # Locate nssm.exe installed by choco
-          $nssmExe = (Get-Command nssm -ErrorAction SilentlyContinue).Source
-          if (-not $nssmExe) {
-            # Fallback: known choco install path
-            $nssmExe = 'C:\ProgramData\chocolatey\bin\nssm.exe'
+          # Use the real nssm.exe from the lib folder — NOT the shim in bin/
+          $nssmExe = 'C:\ProgramData\chocolatey\lib\NSSM\tools\nssm.exe'
+          if (-not (Test-Path $nssmExe)) {
+            # Some choco versions lowercase the package name
+            $nssmExe = 'C:\ProgramData\chocolatey\lib\nssm\tools\nssm.exe'
           }
-          if (-not (Test-Path $nssmExe)) { throw "nssm.exe not found after choco install" }
-          Write-Host "NSSM located: $nssmExe"
+          if (-not (Test-Path $nssmExe)) {
+            throw "Real nssm.exe not found at chocolatey lib path. Shim must not be used."
+          }
+
+          Write-Host "NSSM (real binary): $nssmExe"
           Write-Host "NSSM version: $(& $nssmExe version 2>&1 | Select-Object -First 1)"
 
           New-Item -ItemType Directory -Force "installer\assets\tools" | Out-Null
           Copy-Item $nssmExe "installer\assets\tools\nssm.exe"
-          Write-Host "NSSM staged: installer\assets\tools\nssm.exe"
+
+          # Verify the staged binary runs standalone (no shim dependency)
+          $stagedVer = & "installer\assets\tools\nssm.exe" version 2>&1 | Select-Object -First 1
+          Write-Host "Staged NSSM self-test: $stagedVer"
+          if ($stagedVer -notmatch 'NSSM') { throw "Staged nssm.exe failed self-test: $stagedVer" }
+          Write-Host "NSSM staged and verified: installer\assets\tools\nssm.exe"
         shell: pwsh
 
       # ── 7. Resolve version string ─────────────────────────────────────────────
