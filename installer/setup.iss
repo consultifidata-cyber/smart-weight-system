@@ -132,6 +132,12 @@ Source: "tools\detect-hardware.ps1"; \
   DestDir: "{tmp}"; \
   Flags: deleteafterinstall
 
+; ── Desktop shortcut — opens localhost:3000 in the default browser ───────────
+[Icons]
+Name: "{commondesktop}\Smart Weight System"; \
+  Filename: "http://localhost:3000"; \
+  Comment: "Open Smart Weight System weighing station"
+
 ; ── Directories ─────────────────────────────────────────────────────────────
 [Dirs]
 Name: "{app}\logs"
