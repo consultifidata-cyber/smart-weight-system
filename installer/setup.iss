@@ -148,11 +148,7 @@ Filename: "powershell.exe"; \
   Flags: runhidden waituntilterminated; \
   StatusMsg: "Configuring firewall rules..."
 
-; 2. Generate .env from wizard inputs
-Filename: "powershell.exe"; \
-  Parameters: "{code:GetEnvParameters}"; \
-  Flags: runhidden waituntilterminated; \
-  StatusMsg: "Writing station configuration..."
+; 2. .env written directly by Pascal CurStepChanged(ssPostInstall) — no PowerShell needed
 
 ; 3. Install Windows Service (NSSM)
 Filename: "powershell.exe"; \
@@ -661,6 +657,127 @@ begin
     Space + '2. Windows Service registered' + NewLine +
     Space + '3. System starts automatically' + NewLine +
     Space + '4. Browser opens to http://localhost:3000';
+end;
+
+// ── Write .env directly from wizard values ────────────────────────────────────
+// Called at ssPostInstall (after files extracted, before service install).
+// Writing directly from Pascal is 100% reliable — no PowerShell parameter
+// passing, no encoding issues, no command-line length limits.
+procedure WriteEnvFile;
+var
+  EnvPath        : String;
+  PrinterPath    : String;
+  PrinterIface   : String;
+  ScalePort      : String;
+  PrintMode      : String;
+  PrinterDevice  : String;
+  PrinterName    : String;
+  PrinterUsbDev  : String;
+  PrinterComPort : String;
+  ScaleAutoDetect: String;
+  SepPos         : Integer;
+  Content        : String;
+begin
+  EnvPath      := ExpandConstant('{app}') + '\.env';
+  PrinterPath  := GetSelectedPrinterPath;
+  PrinterIface := GetSelectedPrinterIface;
+  ScalePort    := GetSelectedScalePort;
+
+  // Safe defaults (match print-service built-in defaults)
+  PrintMode      := 'WINDOWS';
+  PrinterDevice  := 'TVSLP46NEO';
+  PrinterName    := 'SNBC TVSE LP 46 NEO BPLE';
+  PrinterUsbDev  := '';
+  PrinterComPort := '';
+
+  if PrinterIface = 'WINDOWS' then begin
+    PrintMode := 'WINDOWS';
+    SepPos := Pos('::', PrinterPath);
+    if SepPos > 0 then begin
+      PrinterName   := Copy(PrinterPath, 1, SepPos - 1);
+      PrinterDevice := Copy(PrinterPath, SepPos + 2, Length(PrinterPath));
+    end else if PrinterPath <> '' then begin
+      PrinterName   := PrinterPath;
+      PrinterDevice := PrinterPath;
+    end;
+    if PrinterDevice = '' then PrinterDevice := 'TVSLP46NEO';
+    if PrinterName   = '' then PrinterName   := PrinterDevice;
+  end else if PrinterIface = 'COM' then begin
+    PrintMode      := 'RAW_DIRECT';
+    PrinterComPort := PrinterPath;
+    PrinterDevice  := '';
+    PrinterName    := '';
+  end else begin
+    PrintMode     := 'RAW_DIRECT';
+    PrinterUsbDev := PrinterPath;
+    PrinterDevice := '';
+    PrinterName   := '';
+  end;
+
+  if ScalePort <> '' then ScaleAutoDetect := 'false' else ScaleAutoDetect := 'true';
+
+  Content :=
+    '# Smart Weight System -- Station Configuration' + #13#10 +
+    '# Generated ' + GetDateTimeString('yyyy/mm/dd hh:nn:ss', '/', ':') + #13#10 +
+    #13#10 +
+    '# -- Station Identity' + #13#10 +
+    'STATION_ID=' + PageStation.Values[1] + #13#10 +
+    'PLANT_ID='   + PageStation.Values[0] + #13#10 +
+    #13#10 +
+    '# -- Weight Service (port 5000)' + #13#10 +
+    'SERIAL_PORT='             + ScalePort       + #13#10 +
+    'SCALE_AUTO_DETECT='       + ScaleAutoDetect + #13#10 +
+    'SCALE_NO_DATA_TIMEOUT_MS=15000' + #13#10 +
+    'SERIAL_BAUD_RATE=9600'    + #13#10 +
+    'SERIAL_DATA_BITS=8'       + #13#10 +
+    'SERIAL_PARITY=none'       + #13#10 +
+    'SERIAL_STOP_BITS=1'       + #13#10 +
+    'SIMULATE_SERIAL=false'    + #13#10 +
+    'WEIGHT_API_PORT=5000'     + #13#10 +
+    'STABILITY_THRESHOLD_MS=1500' + #13#10 +
+    'STABILITY_TOLERANCE_KG=0.02' + #13#10 +
+    'LOG_LEVEL=info'           + #13#10 +
+    #13#10 +
+    '# -- Print Service (port 5001)' + #13#10 +
+    'PRINTER_DRIVER=tspl'       + #13#10 +
+    'PRINT_MODE='               + PrintMode      + #13#10 +
+    'PRINTER_INTERFACE='        + PrinterIface   + #13#10 +
+    'PRINTER_AUTO_DETECT=false' + #13#10 +
+    'PRINTER_USB_DEVICE='       + PrinterUsbDev  + #13#10 +
+    'PRINTER_COM_PORT='         + PrinterComPort + #13#10 +
+    'PRINTER_DEVICE='           + PrinterDevice  + #13#10 +
+    'PRINTER_NAME='             + PrinterName    + #13#10 +
+    'PRINTER_LABEL_WIDTH=50'    + #13#10 +
+    'PRINTER_LABEL_HEIGHT=50'   + #13#10 +
+    'PRINTER_DPI=203'           + #13#10 +
+    'PRINT_API_PORT=5001'       + #13#10 +
+    #13#10 +
+    '# -- Sync Service (port 5002)' + #13#10 +
+    'SYNC_API_PORT=5002'                  + #13#10 +
+    'DJANGO_SERVER_URL=' + PageServer.Values[0] + #13#10 +
+    'DJANGO_API_TOKEN='  + PageServer.Values[1] + #13#10 +
+    'SYNC_RETRY_INTERVAL_MS=60000'        + #13#10 +
+    'MASTER_SYNC_INTERVAL_MS=300000'      + #13#10 +
+    'SYNC_PUSH_TIMEOUT_MS=10000'          + #13#10 +
+    'BAG_SYNC_INTERVAL_MS=10000'          + #13#10 +
+    'OFFLINE_DAY_SEQ_START=90'            + #13#10 +
+    'OFFLINE_DAY_SEQ_END=99'              + #13#10 +
+    #13#10 +
+    '# -- Web UI (port 3000)' + #13#10 +
+    'WEB_UI_PORT=3000' + #13#10 +
+    #13#10 +
+    '# -- Launcher' + #13#10 +
+    'WEIGHT_SERVICE_URL=http://localhost:5000' + #13#10 +
+    'LAUNCHER_HEALTH_PORT=5099' + #13#10;
+
+  SaveStringToFile(EnvPath, Content, False);
+  Log('.env written: ' + EnvPath);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    WriteEnvFile;
 end;
 
 // ── Custom Finish page — show URLs, log path, support command ─────────────────
