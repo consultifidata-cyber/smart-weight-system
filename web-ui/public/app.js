@@ -71,6 +71,7 @@ function weightApp() {
     systemReady:        false,
     systemReadyChecked: false,
     systemReadyIssues:  [],
+    _systemStartupRetry: 0,   // silent retries before showing error gate
     _readinessRetryId:  null,
 
     // ── Phase H: shift checklist ──
@@ -255,7 +256,20 @@ function weightApp() {
     checkSystemReady() {
       var self = this;
       this._doReadinessCheck().then(function () {
-        if (!self.systemReady) {
+        if (self.systemReady) {
+          self._systemStartupRetry = 0;
+          return;
+        }
+        // First 30 seconds: retry silently every 5s without showing the error gate.
+        // Devices are connected — services just need a moment to initialise.
+        // Only show the error overlay after 6 silent retries (~30s).
+        if (self._systemStartupRetry < 6) {
+          self._systemStartupRetry++;
+          self.systemReadyChecked = false;   // keep gate hidden during grace period
+          setTimeout(function () { self.checkSystemReady(); }, 5000);
+        } else {
+          // Grace period exhausted — show the error so operator can act
+          self.systemReadyChecked = true;
           self._readinessRetryId = setTimeout(function () {
             self.checkSystemReady();
           }, 10000);

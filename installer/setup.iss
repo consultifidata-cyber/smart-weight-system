@@ -756,7 +756,7 @@ begin
     'DJANGO_SERVER_URL=' + PageServer.Values[0] + #13#10 +
     'DJANGO_API_TOKEN='  + PageServer.Values[1] + #13#10 +
     'SYNC_RETRY_INTERVAL_MS=60000'        + #13#10 +
-    'MASTER_SYNC_INTERVAL_MS=300000'      + #13#10 +
+    'MASTER_SYNC_INTERVAL_MS=60000'       + #13#10 +
     'SYNC_PUSH_TIMEOUT_MS=10000'          + #13#10 +
     'BAG_SYNC_INTERVAL_MS=10000'          + #13#10 +
     'OFFLINE_DAY_SEQ_START=90'            + #13#10 +

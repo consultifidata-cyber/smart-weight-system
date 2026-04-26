@@ -43,8 +43,8 @@ const config: SyncServiceConfig = Object.freeze({
 
   bagSyncIntervalMs: parseInt(process.env.BAG_SYNC_INTERVAL_MS || '10000', 10),
   syncRetryIntervalMs: parseInt(process.env.SYNC_RETRY_INTERVAL_MS || '60000', 10),
-  // Phase G: reduced from 1 hour to 5 minutes so new workers/FG items appear quickly.
-  masterSyncIntervalMs: parseInt(process.env.MASTER_SYNC_INTERVAL_MS || '300000', 10),
+  // 1 minute on first deployment so workers/products appear immediately.
+  masterSyncIntervalMs: parseInt(process.env.MASTER_SYNC_INTERVAL_MS || '60000', 10),
   syncPushTimeoutMs: parseInt(process.env.SYNC_PUSH_TIMEOUT_MS || '10000', 10),
 
   offlineDaySeqStart: parseInt(process.env.OFFLINE_DAY_SEQ_START || '90', 10),
