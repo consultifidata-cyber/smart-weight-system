@@ -177,7 +177,7 @@ Filename: "powershell.exe"; \
 
 // ── Global state ─────────────────────────────────────────────────────────────
 var
-  // Custom wizard page: Hardware Detection
+  // Custom wizard page: Device Check
   PageHardware : TWizardPage;
 
   // Controls on hardware page
@@ -187,6 +187,7 @@ var
   LblScaleTitle     : TNewStaticText;
   LblScaleHint      : TNewStaticText;
   ComboScale        : TNewComboBox;
+  LblScanStatus     : TNewStaticText;
 
   // Input query pages
   PageServer  : TInputQueryWizardPage;
@@ -320,6 +321,14 @@ begin
 
   Log('Printers detected: ' + IntToStr(GetArrayLength(PrinterPathArr) - 1));  // -1 for manual entry
   Log('Scales detected:   ' + IntToStr(GetArrayLength(ScalePortArr)   - 1));
+
+  // Update status label so the user sees the result immediately
+  if Assigned(LblScanStatus) then begin
+    LblScanStatus.Caption :=
+      'Found: ' + IntToStr(GetArrayLength(PrinterPathArr) - 1) + ' printer(s),  ' +
+      IntToStr(GetArrayLength(ScalePortArr) - 1) + ' COM port(s).  ' +
+      'See %TEMP%\smart-weight-setup.log for details.';
+  end;
 end;
 
 // ── Get currently selected printer path ──────────────────────────────────────
@@ -422,12 +431,12 @@ var
   Y: Integer;
   BtnRescan: TNewButton;   // Re-scan button — declared here (Pascal requires all vars at top)
 begin
-  // ── Page 1: Hardware Detection ───────────────────────────────────────────
+  // ── Page 1: Device Check ─────────────────────────────────────────────────
   PageHardware := CreateCustomPage(
     wpWelcome,
-    'Hardware Detection',
-    'The installer scanned for connected hardware. ' +
-    'Confirm the detected devices or select manually.'
+    'Device Check',
+    'Install your printer driver and USB-serial adapter driver first, ' +
+    'then click CHECK DEVICES. Select your devices from the lists below.'
   );
 
   Y := 0;
@@ -435,7 +444,7 @@ begin
   // Printer section
   LblPrinterTitle := TNewStaticText.Create(PageHardware);
   LblPrinterTitle.Parent  := PageHardware.Surface;
-  LblPrinterTitle.Caption := 'Label Printer (USB):';
+  LblPrinterTitle.Caption := 'Label Printer:';
   LblPrinterTitle.Font.Style := [fsBold];
   LblPrinterTitle.Left    := 0;
   LblPrinterTitle.Top     := Y;
@@ -454,10 +463,9 @@ begin
   LblPrinterHint := TNewStaticText.Create(PageHardware);
   LblPrinterHint.Parent  := PageHardware.Surface;
   LblPrinterHint.Caption :=
-    'Connect the label printer USB cable and power it ON.'#13#10 +
-    'No driver installation required — it will appear automatically.'#13#10 +
-    'TVS LP 46 NEO shows as "\\.\USBPRIN01" OR as a COM port.'#13#10 +
-    'Not showing? Click RE-SCAN below (wait 5 seconds after powering on first).';
+    'All printers installed on this PC appear above. Install the printer'#13#10 +
+    'driver first if needed, then click CHECK DEVICES. You can also type a'#13#10 +
+    'printer name manually in the box above.';
   LblPrinterHint.Left    := 0;
   LblPrinterHint.Top     := Y;
   LblPrinterHint.Width   := PageHardware.SurfaceWidth;
@@ -471,7 +479,7 @@ begin
   // Scale section
   LblScaleTitle := TNewStaticText.Create(PageHardware);
   LblScaleTitle.Parent  := PageHardware.Surface;
-  LblScaleTitle.Caption := 'Weighing Scale (USB-Serial COM port):';
+  LblScaleTitle.Caption := 'Weighing Scale COM Port:';
   LblScaleTitle.Font.Style := [fsBold];
   LblScaleTitle.Left    := 0;
   LblScaleTitle.Top     := Y;
@@ -490,28 +498,34 @@ begin
   LblScaleHint := TNewStaticText.Create(PageHardware);
   LblScaleHint.Parent  := PageHardware.Surface;
   LblScaleHint.Caption :=
-    'Connect the weighing scale USB cable and power on the scale.'#13#10 +
-    'It should appear here as a COM port (e.g. COM3, COM4).'#13#10 +
-    'Not showing? Open Device Manager. If you see "Unknown Device" under USB,'#13#10 +
-    'the CH340 driver is missing. Download it from: wch.cn/products/CH340.html'#13#10 +
-    'Install the driver, then click RE-SCAN below.';
+    'All active COM ports appear above (any USB-serial adapter, any chip).'#13#10 +
+    'Install the USB-serial adapter driver first if the port is not listed.'#13#10 +
+    'You can also type the port manually (e.g. COM5) in the box above.';
   LblScaleHint.Left    := 0;
   LblScaleHint.Top     := Y;
   LblScaleHint.Width   := PageHardware.SurfaceWidth;
   LblScaleHint.AutoSize := True;
 
-  // ── RE-SCAN button — lets technician re-detect after connecting hardware ───
-  // Placed below scale hint. Calls RunHardwareDetection() which re-runs the
-  // PowerShell script and repopulates both dropdowns without leaving the page.
-  Y := Y + 52;
+  // ── CHECK DEVICES button ─────────────────────────────────────────────────
+  Y := Y + 44;
   BtnRescan := TNewButton.Create(PageHardware);
   BtnRescan.Parent  := PageHardware.Surface;
-  BtnRescan.Caption := '↻  RE-SCAN HARDWARE  (plug in devices first, then click)';
+  BtnRescan.Caption := '  CHECK DEVICES  (click after installing drivers)';
   BtnRescan.Left    := 0;
   BtnRescan.Top     := Y;
   BtnRescan.Width   := PageHardware.SurfaceWidth;
   BtnRescan.Height  := 36;
   BtnRescan.OnClick := @OnRescanClick;
+
+  // ── Status line — shows count after each scan ────────────────────────────
+  Y := Y + 42;
+  LblScanStatus := TNewStaticText.Create(PageHardware);
+  LblScanStatus.Parent   := PageHardware.Surface;
+  LblScanStatus.Caption  := 'Click CHECK DEVICES to enumerate installed printers and COM ports.';
+  LblScanStatus.Left     := 0;
+  LblScanStatus.Top      := Y;
+  LblScanStatus.Width    := PageHardware.SurfaceWidth;
+  LblScanStatus.AutoSize := True;
 
   // ── Page 2: Server Configuration ─────────────────────────────────────────
   PageServer := CreateInputQueryPage(
