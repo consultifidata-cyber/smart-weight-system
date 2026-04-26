@@ -95,9 +95,12 @@
         <div class="wsm-actions">
           <button class="wsm-cancel-btn" @click="closeWorkerSummaryModal()">Cancel</button>
           <button class="wsm-print-btn"
-            :disabled="!wsModal.data || wsModal.data.rows.length === 0 || wsModal.stale"
+            :disabled="!wsModal.data || wsModal.data.rows.length === 0 || wsModal.stale || wsModal.printing"
+            :class="{ 'wsm-print-done': wsModal.printDone }"
             @click="printWorkerSummary()">
-            🖨 Print
+            <span x-show="wsModal.printing">Printing…</span>
+            <span x-show="wsModal.printDone && !wsModal.printing">✓ Printed!</span>
+            <span x-show="!wsModal.printing && !wsModal.printDone">🖨 Print</span>
           </button>
         </div>
 

@@ -35,7 +35,7 @@ function weightApp() {
     pinnedWorkerCodes: [],   // max 15 codes, ORDER IS STABLE
     workerLastUsed:   {},    // { code: timestamp } — for eviction decisions
     workerPanelOpen:  false, // worker info/lookup panel
-    wsModal: { show: false, date: '', shift: '', loading: false, data: null, error: '', stale: false },
+    wsModal: { show: false, date: '', shift: '', loading: false, data: null, error: '', stale: false, printing: false, printDone: false },
 
     // ── Today's bag count ──
     totalBagsToday: 0,
@@ -995,7 +995,7 @@ function weightApp() {
       } else {
         d = now.toISOString().substring(0, 10);
       }
-      this.wsModal = { show: true, date: d, shift: shift, loading: false, data: null, error: '', stale: false };
+      this.wsModal = { show: true, date: d, shift: shift, loading: false, data: null, error: '', stale: false, printing: false, printDone: false };
     },
 
     closeWorkerSummaryModal() {
@@ -1029,10 +1029,40 @@ function weightApp() {
       if (this.wsModal.data) { this.wsModal.stale = true; }
     },
 
-    printWorkerSummary() {
-      // Phase 2 stub — Phase 3 will format as TSPL and send to printer
-      console.log('[worker-summary] printing:', JSON.stringify(this.wsModal.data, null, 2));
-      alert('Phase 3 will wire this to the label printer.');
+    async printWorkerSummary() {
+      var m = this.wsModal;
+      if (!m.data || m.data.grand_total === 0) return;
+
+      m.printing  = true;
+      m.printDone = false;
+
+      // Dry-run: uncomment next line to log TSPL payload without sending
+      // console.log('[worker-summary] payload:', JSON.stringify(m.data, null, 2)); return;
+
+      var self = this;
+      try {
+        var res = await this._fetchWithTimeout(
+          CONFIG.printServiceUrl + '/print/worker-summary',
+          {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(m.data),
+          },
+          15000,   // label strip can be long — allow more time than a bag label
+        );
+
+        if (res.ok) {
+          m.printDone = true;
+          setTimeout(function () { self.closeWorkerSummaryModal(); }, 1500);
+        } else {
+          var errJson = await res.json().catch(function () { return {}; });
+          self._showErrorModal('PRINT FAILED', errJson.error || 'Printer returned an error.', false);
+        }
+      } catch (e) {
+        self._showErrorModal('PRINT FAILED', 'Could not reach print service — is it running?', false);
+      } finally {
+        m.printing = false;
+      }
     },
 
     _fetchWithTimeout(url, options, timeoutMs) {

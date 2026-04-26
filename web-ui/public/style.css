@@ -672,3 +672,4 @@ html, body {
   background: var(--blue); color: white; border: none; border-radius: 9px; cursor: pointer;
 }
 .wsm-print-btn:disabled { opacity: .4; cursor: default; }
+.wsm-print-done { background: var(--green) !important; }
