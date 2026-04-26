@@ -716,14 +716,15 @@ begin
 
   if ScalePort <> '' then ScaleAutoDetect := 'false' else ScaleAutoDetect := 'true';
 
+  // Rule: never put #13#10 alone at the start of a line — ISPP preprocessor
+  // misreads leading '#' as a directive. Always attach blank lines to the END
+  // of the preceding string (two consecutive #13#10 = one blank line in output).
   Content :=
     '# Smart Weight System -- Station Configuration' + #13#10 +
-    '# Generated ' + GetDateTimeString('yyyy/mm/dd hh:nn:ss', '/', ':') + #13#10 +
-    #13#10 +
+    '# Generated ' + GetDateTimeString('yyyy/mm/dd hh:nn:ss', '/', ':') + #13#10 + #13#10 +
     '# -- Station Identity' + #13#10 +
     'STATION_ID=' + PageStation.Values[1] + #13#10 +
-    'PLANT_ID='   + PageStation.Values[0] + #13#10 +
-    #13#10 +
+    'PLANT_ID='   + PageStation.Values[0] + #13#10 + #13#10 +
     '# -- Weight Service (port 5000)' + #13#10 +
     'SERIAL_PORT='             + ScalePort       + #13#10 +
     'SCALE_AUTO_DETECT='       + ScaleAutoDetect + #13#10 +
@@ -736,8 +737,7 @@ begin
     'WEIGHT_API_PORT=5000'     + #13#10 +
     'STABILITY_THRESHOLD_MS=1500' + #13#10 +
     'STABILITY_TOLERANCE_KG=0.02' + #13#10 +
-    'LOG_LEVEL=info'           + #13#10 +
-    #13#10 +
+    'LOG_LEVEL=info'           + #13#10 + #13#10 +
     '# -- Print Service (port 5001)' + #13#10 +
     'PRINTER_DRIVER=tspl'       + #13#10 +
     'PRINT_MODE='               + PrintMode      + #13#10 +
@@ -750,8 +750,7 @@ begin
     'PRINTER_LABEL_WIDTH=50'    + #13#10 +
     'PRINTER_LABEL_HEIGHT=50'   + #13#10 +
     'PRINTER_DPI=203'           + #13#10 +
-    'PRINT_API_PORT=5001'       + #13#10 +
-    #13#10 +
+    'PRINT_API_PORT=5001'       + #13#10 + #13#10 +
     '# -- Sync Service (port 5002)' + #13#10 +
     'SYNC_API_PORT=5002'                  + #13#10 +
     'DJANGO_SERVER_URL=' + PageServer.Values[0] + #13#10 +
@@ -761,11 +760,9 @@ begin
     'SYNC_PUSH_TIMEOUT_MS=10000'          + #13#10 +
     'BAG_SYNC_INTERVAL_MS=10000'          + #13#10 +
     'OFFLINE_DAY_SEQ_START=90'            + #13#10 +
-    'OFFLINE_DAY_SEQ_END=99'              + #13#10 +
-    #13#10 +
+    'OFFLINE_DAY_SEQ_END=99'              + #13#10 + #13#10 +
     '# -- Web UI (port 3000)' + #13#10 +
-    'WEB_UI_PORT=3000' + #13#10 +
-    #13#10 +
+    'WEB_UI_PORT=3000'         + #13#10 + #13#10 +
     '# -- Launcher' + #13#10 +
     'WEIGHT_SERVICE_URL=http://localhost:5000' + #13#10 +
     'LAUNCHER_HEALTH_PORT=5099' + #13#10;
