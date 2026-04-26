@@ -4,37 +4,18 @@
 
 .DESCRIPTION
     Called by the Inno Setup installer after file extraction.
-    Reads values collected by the wizard and writes them to InstallDir\.env,
-    ready to be consumed by all four services on first start.
+    Reads values collected by the wizard and writes them to InstallDir\.env.
 
-.PARAMETER InstallDir
-    Root installation directory (e.g. C:\SmartWeightSystem).
-
-.PARAMETER PrinterUsbDevice
-    USB device path detected for the label printer (e.g. \\.\USBPRIN01).
-    Leave empty to use PRINTER_AUTO_DETECT=true.
-
-.PARAMETER ScalePort
-    COM port for the weighing scale (e.g. COM3).
-    Leave empty to use SCALE_AUTO_DETECT=true.
-
-.PARAMETER DjangoUrl
-    Django ERP server URL (e.g. http://192.168.1.100:8000).
-
-.PARAMETER DjangoToken
-    API bearer token from the Django WeighStation admin table.
-
-.PARAMETER PlantId
-    Plant / facility identifier (e.g. A1).
-
-.PARAMETER StationId
-    Station identifier — must be unique per plant (e.g. ST01).
+.PARAMETER PrinterInterface
+    USB      = raw USB Printer Class (\\.\USBPRINxx)  PRINT_MODE=RAW_DIRECT
+    COM      = USB-CDC serial mode                     PRINT_MODE=RAW_DIRECT
+    WINDOWS  = Windows print spooler (Get-Printer)     PRINT_MODE=WINDOWS
 #>
 param(
     [Parameter(Mandatory)][string]$InstallDir,
     [string]$PrinterUsbDevice  = '',
-    [string]$PrinterInterface  = 'USB',   # 'USB' = USBPRIN path, 'COM' = USB-CDC serial
-    [string]$PrinterComPort    = '',      # only used when PrinterInterface=COM
+    [string]$PrinterInterface  = 'USB',
+    [string]$PrinterComPort    = '',
     [string]$ScalePort         = '',
     [string]$DjangoUrl         = '',
     [string]$DjangoToken       = '',
@@ -43,21 +24,56 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-
 $envPath = Join-Path $InstallDir '.env'
 
-# Determine print mode and interface from wizard selection
-$printMode        = 'RAW_DIRECT'   # installer always uses driverless mode
-$printerAutoDetect = 'false'        # explicit device selected in wizard
-$scaleAutoDetect  = if ($ScalePort) { 'false' } else { 'true' }
-
-# For COM-mode printer (USB-CDC), use the COM port for printing
 $effectivePrinterInterface = $PrinterInterface.ToUpper()
-if ($effectivePrinterInterface -eq 'COM') {
-    $PrinterComPort   = $PrinterUsbDevice   # field reused as COM port in COM mode
-    $PrinterUsbDevice = ''
+
+# ── Resolve print mode and device values ──────────────────────────────────────
+$printMode          = 'WINDOWS'
+$printerAutoDetect  = 'false'
+$printerUsbDevOut   = ''
+$printerComPortOut  = ''
+$printerDeviceOut   = ''    # PRINTER_DEVICE  — Windows share name for copy /b
+$printerNameOut     = ''    # PRINTER_NAME    — full name for Get-Printer health check
+
+switch ($effectivePrinterInterface) {
+
+    'WINDOWS' {
+        # Printer selected from Windows print spooler list.
+        # PrinterUsbDevice contains "FullName::ShareName" (encoded by detect-hardware.ps1).
+        # ShareName is used for copy /b  →  \\localhost\<share>
+        # FullName  is used for health   →  Get-Printer -Name <full>
+        $printMode = 'WINDOWS'
+        if ($PrinterUsbDevice -match '::') {
+            $parts             = $PrinterUsbDevice -split '::', 2
+            $printerNameOut    = $parts[0].Trim()    # full name
+            $printerDeviceOut  = $parts[1].Trim()    # share name
+        } else {
+            $printerNameOut    = $PrinterUsbDevice.Trim()
+            $printerDeviceOut  = $PrinterUsbDevice.Trim()
+        }
+        # If no share name was found (printer not shared yet), default to the
+        # print-service's built-in default so the service at least starts.
+        if (-not $printerDeviceOut) { $printerDeviceOut = 'TVSLP46NEO' }
+        if (-not $printerNameOut)   { $printerNameOut   = $printerDeviceOut }
+    }
+
+    'COM' {
+        # USB-CDC mode printer — COM port for raw serial write
+        $printMode         = 'RAW_DIRECT'
+        $printerComPortOut = $PrinterUsbDevice    # reuse field
+    }
+
+    default {
+        # USB Printer Class — \\.\USBPRINxx raw write (driverless)
+        $printMode         = 'RAW_DIRECT'
+        $printerUsbDevOut  = $PrinterUsbDevice
+    }
 }
 
+$scaleAutoDetect = if ($ScalePort) { 'false' } else { 'true' }
+
+# ── Write .env ────────────────────────────────────────────────────────────────
 $content = @"
 # ============================================================
 # Smart Weight System — Station Configuration
@@ -69,9 +85,9 @@ STATION_ID=$StationId
 PLANT_ID=$PlantId
 
 # -- Weight Service (port 5000) -------------------------------
-# USB-serial adapter COM port. Auto-detected if blank.
 SERIAL_PORT=$ScalePort
 SCALE_AUTO_DETECT=$scaleAutoDetect
+SCALE_NO_DATA_TIMEOUT_MS=15000
 SERIAL_BAUD_RATE=9600
 SERIAL_DATA_BITS=8
 SERIAL_PARITY=none
@@ -83,14 +99,16 @@ STABILITY_TOLERANCE_KG=0.02
 LOG_LEVEL=info
 
 # -- Print Service (port 5001) --------------------------------
+# PRINT_MODE=WINDOWS   : use Windows print spooler (copy /b to \\localhost\PRINTER_DEVICE)
+# PRINT_MODE=RAW_DIRECT: bypass spooler, write directly to USB or COM port
 PRINTER_DRIVER=tspl
 PRINT_MODE=$printMode
 PRINTER_INTERFACE=$effectivePrinterInterface
 PRINTER_AUTO_DETECT=$printerAutoDetect
-PRINTER_USB_DEVICE=$PrinterUsbDevice
-PRINTER_COM_PORT=$PrinterComPort
-PRINTER_DEVICE=
-PRINTER_NAME=
+PRINTER_USB_DEVICE=$printerUsbDevOut
+PRINTER_COM_PORT=$printerComPortOut
+PRINTER_DEVICE=$printerDeviceOut
+PRINTER_NAME=$printerNameOut
 PRINTER_LABEL_WIDTH=50
 PRINTER_LABEL_HEIGHT=50
 PRINTER_DPI=203
@@ -101,7 +119,7 @@ SYNC_API_PORT=5002
 DJANGO_SERVER_URL=$DjangoUrl
 DJANGO_API_TOKEN=$DjangoToken
 SYNC_RETRY_INTERVAL_MS=60000
-MASTER_SYNC_INTERVAL_MS=3600000
+MASTER_SYNC_INTERVAL_MS=300000
 SYNC_PUSH_TIMEOUT_MS=10000
 BAG_SYNC_INTERVAL_MS=10000
 OFFLINE_DAY_SEQ_START=90
@@ -110,10 +128,20 @@ OFFLINE_DAY_SEQ_END=99
 # -- Web UI (port 3000) ---------------------------------------
 WEB_UI_PORT=3000
 
-# -- Hardware Manager -----------------------------------------
+# -- Launcher -------------------------------------------------
 WEIGHT_SERVICE_URL=http://localhost:5000
 LAUNCHER_HEALTH_PORT=5099
 "@
 
 $content | Set-Content $envPath -Encoding UTF8
 Write-Host "[OK] .env written to: $envPath"
+
+# ── Print summary so installer log shows what was set ─────────────────────────
+Write-Host "  STATION_ID        = $StationId"
+Write-Host "  PLANT_ID          = $PlantId"
+Write-Host "  SERIAL_PORT       = $(if ($ScalePort) { $ScalePort } else { '(auto-detect)' })"
+Write-Host "  PRINT_MODE        = $printMode"
+Write-Host "  PRINTER_INTERFACE = $effectivePrinterInterface"
+Write-Host "  PRINTER_DEVICE    = $printerDeviceOut"
+Write-Host "  PRINTER_NAME      = $printerNameOut"
+Write-Host "  DJANGO_SERVER_URL = $DjangoUrl"

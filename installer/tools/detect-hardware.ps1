@@ -1,33 +1,17 @@
 <#
 .SYNOPSIS
-    Detect label printers (USB/USB-CDC) and scale COM ports for the installer wizard.
-
+    Detect label printers and scale COM ports for the installer wizard.
 .DESCRIPTION
-    Pure PowerShell reimplementation of printerDetect.ts + scaleDetect.ts.
-    Runs DURING the Inno Setup wizard (before file extraction) — no Node.js required.
-
-    COMPLETELY DRIVERLESS — does not require any printer driver installation.
-
-    Printer detection covers three paths:
-      1. \\.\USBPRINxx  — Windows auto-loaded usbprint.sys (USB Printer Class devices).
-                          Needs NO user action. usbprint.sys ships inside Windows.
-      2. COM port       — USB-CDC mode printers (e.g. TVS LP 46 NEO with WCH/GD32 chip).
-                          Windows auto-loads usbser.sys. Also needs NO user action.
-      3. libusb         — Handled at runtime by UsbDirectAdapter; not detectable here.
-
-    Output format (pipe-delimited text files for Inno Setup Pascal):
-
-    sws_printers.txt
-      Format : "Display Name|\\.\USBPRINxx|VID|PROTOCOL|USB"   ← USB Printer Class
-               "Display Name|COMx|VID|PROTOCOL|COM"            ← USB-CDC mode printer
-    sws_scales.txt
-      Format : "Display Name|COMx|VID|CONFIDENCE"
-
+    Three printer paths:
+      1. \\.\USBPRINxx  -- raw USB Printer Class (usbprint.sys, driverless)
+      2. COM port       -- USB-CDC printers (GD32/WCH chip, usbser.sys)
+      3. Get-Printer    -- Windows print spooler (installed driver)
+    Two COM port paths:
+      1. PnP FriendlyName match (BUG FIX: was checking Name, not FriendlyName)
+      2. Registry HKLM\HARDWARE\DEVICEMAP\SERIALCOMM -- ALL ports, no VID filter
+    Diagnostic log written to %TEMP%\smart-weight-setup.log
 .PARAMETER OutputDir
-    Directory to write output files. Default: %TEMP%.
-
-.EXAMPLE
-    powershell -File detect-hardware.ps1 -OutputDir C:\Temp
+    Directory to write sws_printers.txt and sws_scales.txt. Default: %TEMP%.
 #>
 param(
     [string]$OutputDir = $env:TEMP
@@ -35,7 +19,21 @@ param(
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-# ── Known USB-serial VIDs (mirrors scaleDetect.ts VID_TABLE) ─────────────────
+# ---- Diagnostic log ----------------------------------------------------------
+$diagLog   = Join-Path $OutputDir 'smart-weight-setup.log'
+$diagLines = [System.Collections.Generic.List[string]]::new()
+
+function DiagLog([string]$msg) {
+    $diagLines.Add($msg)
+    Write-Host $msg
+}
+
+DiagLog 'Smart Weight System - Hardware Detection'
+DiagLog "Timestamp : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+DiagLog "OS        : $([System.Environment]::OSVersion.VersionString)"
+DiagLog ''
+
+# ---- Known VID tables --------------------------------------------------------
 $SCALE_VIDS = @{
     '1A86' = @{ Chip = 'WCH CH340/CH341';     Confidence = 'HIGH'   }
     '0403' = @{ Chip = 'FTDI FT232';          Confidence = 'HIGH'   }
@@ -46,7 +44,6 @@ $SCALE_VIDS = @{
     '2341' = @{ Chip = 'Arduino CDC';         Confidence = 'MEDIUM' }
 }
 
-# ── Known USB printer VIDs (mirrors printerDetect.ts VID_MAP) ────────────────
 $PRINTER_VIDS = @{
     '1203' = @{ Protocol = 'TSPL'; Mfr = 'TSC Auto-ID Technology'      }
     '0FE6' = @{ Protocol = 'TSPL'; Mfr = 'IDS / TVS Electronics'       }
@@ -60,7 +57,8 @@ $PRINTER_VIDS = @{
     '0519' = @{ Protocol = 'ESC_POS'; Mfr = 'Star Micronics'           }
 }
 
-# ── Helper: open a file for writing (tests USB printer path access) ───────────
+$PRINTER_CDC_VIDS = @('28E9','0FE6','154F','1203','0A5F','1504','04B8','0519')
+
 function Test-WriteAccess([string]$Path) {
     try {
         $fs = [System.IO.File]::Open(
@@ -71,253 +69,280 @@ function Test-WriteAccess([string]$Path) {
         )
         $fs.Close()
         return $true
-    } catch {
-        return $false
-    }
+    } catch { return $false }
 }
 
-# ── Step 1: Probe USB printer device paths with RETRY ────────────────────────
-# Windows takes 2-10 seconds to enumerate USB devices after plug-in.
-# We retry 3 times with a 3-second gap to catch recently-plugged printers.
+$printerLines = @()
 
-Write-Host 'Detecting USB printer paths (up to 3 attempts, 3s apart)...'
+# ==============================================================================
+# PRINTER PATH 1 -- \\.\USBPRINxx raw device (driverless)
+# ==============================================================================
+DiagLog '--- Printer Path 1: USB Printer Class (\\.\USBPRINxx) ---'
 $writablePaths = @()
-$maxPrinterAttempts = 3
 
-for ($attempt = 1; $attempt -le $maxPrinterAttempts; $attempt++) {
+for ($attempt = 1; $attempt -le 3; $attempt++) {
     $found = @()
     for ($i = 1; $i -le 20; $i++) {
-        $pad  = $i.ToString('00')
-        $path = "\\.\USBPRIN$pad"
-        if (Test-WriteAccess $path) {
-            $found += $path
-            Write-Host "  Found: $path"
-        }
+        $p = '\\.\USBPRIN' + $i.ToString('00')
+        if (Test-WriteAccess $p) { $found += $p; DiagLog "  Found: $p" }
         if ($i -gt 5 -and $found.Count -eq 0) { break }
     }
-
-    if ($found.Count -gt 0) {
-        $writablePaths = $found
-        break
-    }
-
-    if ($attempt -lt $maxPrinterAttempts) {
-        Write-Host "  No USBPRIN paths found (attempt $attempt/$maxPrinterAttempts) - waiting 3s for USB enumeration..."
+    if ($found.Count -gt 0) { $writablePaths = $found; break }
+    if ($attempt -lt 3) {
+        DiagLog "  No USBPRIN paths (attempt $attempt/3) - waiting 3s..."
         Start-Sleep -Seconds 3
     }
 }
 
 if ($writablePaths.Count -eq 0) {
-    Write-Host '  NOTE: No USB Printer Class paths found after retries.'
-    Write-Host '        This is normal if the printer uses USB-CDC mode (it will appear as a COM port below).'
-    Write-Host '        Ensure the printer is: (1) connected via USB  (2) powered ON  (3) ready lamp is lit'
+    DiagLog '  No \\.\USBPRINxx paths - printer may use Windows spooler or USB-CDC.'
 }
 
-# ── Step 2: Query PnP USB devices for VID/PID/name (parallel with path probe) ─
-Write-Host 'Querying PnP USB devices...'
+DiagLog 'Querying PnP USB devices...'
 $usbDevices = @(
     Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
     Where-Object { $_.InstanceId -match 'USB\\VID_' -and $_.Status -eq 'OK' } |
     ForEach-Object {
         $vid = ([regex]::Match($_.InstanceId, 'VID_([0-9A-Fa-f]{4})')).Groups[1].Value.ToUpper()
-        $pid = ([regex]::Match($_.InstanceId, 'PID_([0-9A-Fa-f]{4})')).Groups[1].Value.ToUpper()
         if (-not $vid) { return }
         [PSCustomObject]@{
-            Name = if ($_.FriendlyName) { $_.FriendlyName } else { $_.Description }
-            VID  = $vid
-            PID  = $pid
+            Name  = if ($_.FriendlyName) { $_.FriendlyName } else { $_.Description }
+            VID   = $vid
             Class = $_.Class
         }
     }
 )
-
-# ── Step 3: Build printer list ────────────────────────────────────────────────
-Write-Host 'Building printer list...'
-$printerLines = @()
+DiagLog "  PnP USB devices: $($usbDevices.Count)"
 
 foreach ($usbPath in $writablePaths) {
     $idx     = [int]($usbPath -replace '[^\d]','') - 1
-    if ($idx -lt $usbDevices.Count) { $pnpDev = $usbDevices[$idx] } else { $pnpDev = $null }
-    if ($pnpDev)                    { $vid = $pnpDev.VID }         else { $vid = '' }
-    if ($pnpDev -and $pnpDev.Name)  { $devName = $pnpDev.Name }   else { $devName = '' }
+    $pnpDev  = if ($idx -lt $usbDevices.Count) { $usbDevices[$idx] } else { $null }
+    $vid     = if ($pnpDev) { $pnpDev.VID } else { '' }
+    $devName = if ($pnpDev -and $pnpDev.Name) { $pnpDev.Name } else { '' }
 
-    # Classify protocol
     $protocol = 'UNKNOWN'
     $mfrNote  = ''
     if ($vid -and $PRINTER_VIDS.ContainsKey($vid)) {
         $protocol = $PRINTER_VIDS[$vid].Protocol
         $mfrNote  = $PRINTER_VIDS[$vid].Mfr
-    } elseif ($devName -match 'TVS|TSC|SNBC|LP46') {
-        $protocol = 'TSPL'
-    } elseif ($devName -match 'Zebra') {
-        $protocol = 'ZPL'
-    } elseif ($devName -match 'Epson|Star|ESC') {
-        $protocol = 'ESC_POS'
-    }
+    } elseif ($devName -match 'TVS|TSC|SNBC|LP46') { $protocol = 'TSPL' }
+    elseif ($devName -match 'Zebra')                { $protocol = 'ZPL' }
+    elseif ($devName -match 'Epson|Star|ESC')       { $protocol = 'ESC_POS' }
 
-    # Build display string (avoid inline-if expressions for PS 5.1 compat)
-    if ($mfrNote) {
-        $displayName = $mfrNote + ' (' + $usbPath + ')'
-    } elseif ($devName) {
-        $displayName = $devName + ' (' + $usbPath + ')'
-    } else {
-        $displayName = 'USB Printer (' + $usbPath + ')'
-    }
+    $dn = ''
+    if ($mfrNote) { $dn = $mfrNote + ' (' + $usbPath + ')' }
+    elseif ($devName) { $dn = $devName + ' (' + $usbPath + ')' }
+    else { $dn = 'USB Printer (' + $usbPath + ')' }
+    $dn = $dn -replace '\|', '-'
 
-    # Sanitise: remove pipe characters from display name
-    $displayName = $displayName -replace '\|', '-'
-
-    # Append interface type (USB = USBPRIN path)
-    $printerLines += $displayName + '|' + $usbPath + '|' + $vid + '|' + $protocol + '|USB'
+    $printerLines += $dn + '|' + $usbPath + '|' + $vid + '|' + $protocol + '|USB'
+    DiagLog ('  Added USB printer: ' + $dn)
 }
 
-# ── Step 3b: Also detect USB-CDC mode printers (com port appears instead of USBPRIN)
-# Some printers (e.g. TVS LP 46 NEO with WCH/GD32 chip) enumerate as USB-CDC.
-# Windows auto-loads usbser.sys — a COM port appears. No user driver install needed.
-# Detect these by checking if any known printer VID appears on a COM port.
-
-Write-Host 'Detecting USB-CDC mode printers (COM port)...'
-$printerCdcVids = @('28E9','0FE6','154F','1203','0A5F','1504','04B8','0519')
+# ==============================================================================
+# PRINTER PATH 2 -- USB-CDC COM port mode (usbser.sys)
+# ==============================================================================
+DiagLog ''
+DiagLog '--- Printer Path 2: USB-CDC printers (COM port) ---'
 
 $comDevicesFull = @(
     Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-    Where-Object { ($_.Name -match 'COM\d' -or $_.Description -match 'COM\d') -and $_.InstanceId -match 'USB\\VID_' } |
+    Where-Object {
+        ($_.FriendlyName -match 'COM\d' -or $_.Name -match 'COM\d' -or $_.Description -match 'COM\d') -and
+        $_.InstanceId -match 'USB\\VID_'
+    } |
     ForEach-Object {
-        $comMatch = [regex]::Match($_.Name + ' ' + $_.Description, '(COM\d+)')
+        $src      = [string]$_.FriendlyName + ' ' + [string]$_.Name + ' ' + [string]$_.Description
+        $comMatch = [regex]::Match($src, '(COM\d+)')
         if (-not $comMatch.Success) { return }
-        $vid = ([regex]::Match($_.InstanceId, 'VID_([0-9A-Fa-f]{4})')).Groups[1].Value.ToUpper()
-        $devFriendly = if ($_.FriendlyName) { $_.FriendlyName } else { [string]$_.Description }
-        [PSCustomObject]@{
-            COM  = $comMatch.Groups[1].Value
-            Name = $devFriendly
-            VID  = $vid
-        }
+        $vid      = ([regex]::Match($_.InstanceId, 'VID_([0-9A-Fa-f]{4})')).Groups[1].Value.ToUpper()
+        $friendly = if ($_.FriendlyName) { $_.FriendlyName } else { [string]$_.Description }
+        [PSCustomObject]@{ COM = $comMatch.Groups[1].Value; Name = $friendly; VID = $vid }
     }
 )
 
 foreach ($comDev in $comDevicesFull) {
-    if (-not $printerCdcVids -contains $comDev.VID) { continue }
-
-    $protocol  = 'UNKNOWN'
-    $mfrNote   = ''
+    if ($PRINTER_CDC_VIDS -notcontains $comDev.VID) { continue }
+    $protocol = 'UNKNOWN'
+    $mfrNote  = ''
     if ($PRINTER_VIDS.ContainsKey($comDev.VID)) {
         $protocol = $PRINTER_VIDS[$comDev.VID].Protocol
         $mfrNote  = $PRINTER_VIDS[$comDev.VID].Mfr
     }
-
-    if ($mfrNote) {
-        $displayName = $mfrNote + ' [USB-CDC] (' + $comDev.COM + ')'
-    } else {
-        $displayName = $comDev.Name + ' [USB-CDC]'
-    }
-    $displayName = $displayName -replace '\|', '-'
-
-    Write-Host '  Found CDC printer: ' + $displayName
-    # Append interface type (COM = USB-CDC serial mode)
-    $printerLines += $displayName + '|' + $comDev.COM + '|' + $comDev.VID + '|' + $protocol + '|COM'
+    $dn = ''
+    if ($mfrNote) { $dn = $mfrNote + ' [USB-CDC] (' + $comDev.COM + ')' }
+    else          { $dn = $comDev.Name + ' [USB-CDC]' }
+    $dn = $dn -replace '\|', '-'
+    $printerLines += $dn + '|' + $comDev.COM + '|' + $comDev.VID + '|' + $protocol + '|COM'
+    DiagLog ('  Added CDC printer: ' + $dn)
 }
 
-# Sort: TSPL first, then ZPL, then others; USB before COM within same protocol
+# ==============================================================================
+# PRINTER PATH 3 -- Windows print spooler (Get-Printer)
+# Catches any printer installed via a Windows driver, e.g. SNBC TVSE LP 46 NEO
+# ==============================================================================
+DiagLog ''
+DiagLog '--- Printer Path 3: Windows print spooler (Get-Printer) ---'
+
+try {
+    $spoolerPrinters = @(Get-Printer -ErrorAction Stop)
+    DiagLog "  Get-Printer found: $($spoolerPrinters.Count)"
+} catch {
+    $spoolerPrinters = @()
+    DiagLog ('  Get-Printer failed: ' + $_.Exception.Message)
+}
+
+foreach ($p in $spoolerPrinters) {
+    $pName = [string]$p.Name
+    if (-not $pName) { continue }
+
+    # Skip virtual / system printers
+    if ($pName -match 'PDF|XPS|Fax|OneNote|Microsoft Print|Print to|Send to|CutePDF|Snagit') { continue }
+
+    DiagLog ("  Spooler: '" + $pName + "'  Share:'" + [string]$p.ShareName + "'  Port:'" + [string]$p.PortName + "'")
+
+    # Skip if already found via USBPRIN or CDC
+    $dup = $printerLines | Where-Object { $_ -match [regex]::Escape($pName) }
+    if ($dup) { DiagLog '  -> already listed, skipping'; continue }
+
+    # Share name for copy /b; fall back to printer name if not shared
+    $shareName = ''
+    if ($p.ShareName -and [string]$p.ShareName -ne '') { $shareName = [string]$p.ShareName }
+    else { $shareName = $pName }
+
+    $protocol = 'TSPL'
+    if ($pName -match 'Zebra|ZPL')           { $protocol = 'ZPL' }
+    elseif ($pName -match 'Epson|Star|ESC')  { $protocol = 'ESC_POS' }
+
+    # Encode "FullName::ShareName" so generate-env.ps1 can write both
+    # PRINTER_NAME (full, for health check) and PRINTER_DEVICE (share, for copy /b)
+    $pathField  = ($pName + '::' + $shareName) -replace '\|', '-'
+    $displayStr = ($pName + ' [Windows]')      -replace '\|', '-'
+
+    $printerLines += $displayStr + '|' + $pathField + '|NA|' + $protocol + '|WINDOWS'
+    DiagLog ('  Added Windows printer: ' + $displayStr + ' (share: ' + $shareName + ')')
+}
+
+# Sort: driverless TSPL first, then Windows-installed, then others
 $printerLines = @(
-    @($printerLines | Where-Object { $_ -match '\|TSPL\|' }) +
-    @($printerLines | Where-Object { $_ -match '\|ZPL\|'  }) +
-    @($printerLines | Where-Object { $_ -match '\|ESC_POS\|' }) +
-    @($printerLines | Where-Object { $_ -notmatch '\|(TSPL|ZPL|ESC_POS)\|' })
+    @($printerLines | Where-Object { $_ -match '\|TSPL\|' -and $_ -notmatch '\|WINDOWS$' }) +
+    @($printerLines | Where-Object { $_ -match '\|ZPL\|'  -and $_ -notmatch '\|WINDOWS$' }) +
+    @($printerLines | Where-Object { $_ -match '\|ESC_POS\|' -and $_ -notmatch '\|WINDOWS$' }) +
+    @($printerLines | Where-Object { $_ -match '\|WINDOWS$' }) +
+    @($printerLines | Where-Object { $_ -notmatch '\|(TSPL|ZPL|ESC_POS)\|' -and $_ -notmatch '\|WINDOWS$' })
 )
 
-# Write output
 $printerFile = Join-Path $OutputDir 'sws_printers.txt'
-if ($printerLines.Count -gt 0) {
-    $printerLines | Set-Content $printerFile -Encoding UTF8
-} else {
-    '' | Set-Content $printerFile -Encoding UTF8
-}
-Write-Host "Printers written: $($printerLines.Count) -> $printerFile"
+if ($printerLines.Count -gt 0) { $printerLines | Set-Content $printerFile -Encoding UTF8 }
+else { '' | Set-Content $printerFile -Encoding UTF8 }
 
-# ── Step 4: Build scale (COM port) list WITH RETRY ───────────────────────────
-# CH340/FTDI drivers can take a few seconds to appear after USB plug.
-Write-Host 'Detecting USB-serial COM ports (up to 3 attempts)...'
-$scaleLines    = @()
-$scaleVidLines = @()
-$scaleLowLines = @()
+DiagLog ''
+DiagLog ('=== PRINTERS: ' + $printerLines.Count + ' ===')
+$printerLines | ForEach-Object { DiagLog ('  ' + $_) }
 
-$comDevices = @()
-for ($scaleAttempt = 1; $scaleAttempt -le 3; $scaleAttempt++) {
+# ==============================================================================
+# COM PORT PATH 1 -- PnP VID match (known chips)
+# BUG FIX: was checking $_.Name; USB Serial Port COMx number is in FriendlyName
+# ==============================================================================
+DiagLog ''
+DiagLog '--- COM Path 1: PnP VID match (checks FriendlyName) ---'
+
+$scaleVidLines  = @()
+$scaleLowLines  = @()
+$scaleSeenPorts = [System.Collections.Generic.HashSet[string]]::new()
+$pnpComDevices  = @()
+
+for ($attempt = 1; $attempt -le 3; $attempt++) {
     $found = @(
         Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
-        Where-Object { ($_.Name -match 'COM\d' -or $_.Description -match 'COM\d') -and $_.InstanceId -match 'USB\\VID_' }
+        Where-Object {
+            ($_.FriendlyName -match 'COM\d' -or $_.Name -match 'COM\d' -or $_.Description -match 'COM\d') -and
+            $_.InstanceId -match 'USB\\VID_'
+        }
     )
-    if ($found.Count -gt 0) { $comDevices = $found; break }
-    if ($scaleAttempt -lt 3) {
-        Write-Host "  No USB-serial ports found (attempt $scaleAttempt/3) - waiting 3s..."
+    if ($found.Count -gt 0) { $pnpComDevices = $found; break }
+    if ($attempt -lt 3) {
+        DiagLog "  No PnP USB-serial found (attempt $attempt/3) - waiting 3s..."
         Start-Sleep -Seconds 3
     }
 }
 
-if ($comDevices.Count -eq 0) {
-    Write-Host '  NOTE: No USB-serial adapter detected.'
-    Write-Host '        If scale is connected, ensure the USB-serial driver is installed (CH340/FTDI).'
-    Write-Host '        You can type the COM port manually in the installer wizard.'
-}
+DiagLog "  PnP USB-serial candidates: $($pnpComDevices.Count)"
 
-$comDevices = @(
-    $comDevices |
-    ForEach-Object {
-        $comMatch = [regex]::Match("$($_.Name) $($_.Description)", '(COM\d+)')
-        if (-not $comMatch.Success) { return }
-        $vid = ([regex]::Match($_.InstanceId, 'VID_([0-9A-Fa-f]{4})')).Groups[1].Value.ToUpper()
-        $pid = ([regex]::Match($_.InstanceId, 'PID_([0-9A-Fa-f]{4})')).Groups[1].Value.ToUpper()
-        $devFriendly = if ($_.FriendlyName) { $_.FriendlyName } else { [string]$_.Description }
-        [PSCustomObject]@{
-            COM         = $comMatch.Groups[1].Value
-            Name        = $devFriendly
-            VID         = $vid
-            PID         = $pid
-            IsUsbSerial = ($_.InstanceId -match 'USB\\VID_')
-        }
-    }
-)
+foreach ($dev in $pnpComDevices) {
+    $nameStr  = [string]$dev.FriendlyName + ' ' + [string]$dev.Name + ' ' + [string]$dev.Description
+    $comMatch = [regex]::Match($nameStr, '(COM\d+)')
+    if (-not $comMatch.Success) { continue }
+    $comPort  = $comMatch.Groups[1].Value
 
-foreach ($dev in $comDevices) {
-    $confidence = 'LOW'
+    $vid      = ([regex]::Match($dev.InstanceId, 'VID_([0-9A-Fa-f]{4})')).Groups[1].Value.ToUpper()
+    $friendly = if ($dev.FriendlyName) { $dev.FriendlyName } else { [string]$dev.Description }
+
+    $confidence = 'MEDIUM'
     $chipNote   = ''
-
-    if ($dev.VID -and $SCALE_VIDS.ContainsKey($dev.VID)) {
-        $confidence = $SCALE_VIDS[$dev.VID].Confidence
-        $chipNote   = $SCALE_VIDS[$dev.VID].Chip
-    } elseif ($dev.Name -match 'CH340|CH341|FTDI|CP210|Prolific|Silicon') {
+    if ($vid -and $SCALE_VIDS.ContainsKey($vid)) {
+        $confidence = $SCALE_VIDS[$vid].Confidence
+        $chipNote   = $SCALE_VIDS[$vid].Chip
+    } elseif ($friendly -match 'CH340|CH341|FTDI|CP210|Prolific|Silicon') {
         $confidence = 'HIGH'
         $chipNote   = 'USB-Serial'
-    } elseif ($dev.IsUsbSerial) {
-        $confidence = 'MEDIUM'
     }
 
-    # Only include USB devices (filter out built-in COM ports)
-    if (-not $dev.IsUsbSerial -and -not $dev.VID) { continue }
+    $dn = ''
+    if ($chipNote) { $dn = $chipNote + ' - ' + $comPort }
+    else           { $dn = $friendly }
+    $dn = $dn -replace '\|', '-'
 
-    if ($chipNote) {
-        $displayName = $chipNote + ' - ' + $dev.COM
-    } elseif ($dev.Name) {
-        $displayName = $dev.Name
-    } else {
-        $displayName = 'Serial Port (' + $dev.COM + ')'
-    }
-    $displayName = $displayName -replace '\|', '-'
-
-    $line = $displayName + '|' + $dev.COM + '|' + $dev.VID + '|' + $confidence
-
-    if ($confidence -eq 'HIGH')   { $scaleVidLines += $line }
-    else                          { $scaleLowLines  += $line }
+    $line = $dn + '|' + $comPort + '|' + $vid + '|' + $confidence
+    DiagLog ('  PnP COM: ' + $line)
+    $null = $scaleSeenPorts.Add($comPort)
+    if ($confidence -eq 'HIGH') { $scaleVidLines += $line }
+    else                        { $scaleLowLines  += $line }
 }
 
-$scaleLines = @($scaleVidLines) + @($scaleLowLines)
+# ==============================================================================
+# COM PORT PATH 2 -- Registry SERIALCOMM (ALL ports regardless of VID/driver)
+# This catches COM5 (USB Serial Port) even when VID is unknown or generic.
+# ==============================================================================
+DiagLog ''
+DiagLog '--- COM Path 2: Registry SERIALCOMM (all ports) ---'
+$scaleRegLines = @()
+
+try {
+    $serialComm = Get-ItemProperty 'HKLM:\HARDWARE\DEVICEMAP\SERIALCOMM' -ErrorAction Stop
+    $regPorts = @(
+        $serialComm.PSObject.Properties |
+        Where-Object { $_.Name -notmatch '^PS' -and $_.Value -match '^COM\d+$' } |
+        Select-Object -ExpandProperty Value |
+        Sort-Object { [int]($_ -replace 'COM', '') }
+    )
+    DiagLog ('  Registry COM ports: ' + ($regPorts -join ', '))
+} catch {
+    $regPorts = @()
+    DiagLog ('  Registry read failed: ' + $_.Exception.Message)
+}
+
+foreach ($regPort in $regPorts) {
+    if ($scaleSeenPorts.Contains($regPort)) { continue }
+    $dn = 'Serial Port - ' + $regPort
+    $scaleRegLines += $dn + '|' + $regPort + '|UNKNOWN|MEDIUM'
+    $null = $scaleSeenPorts.Add($regPort)
+    DiagLog ('  Registry COM: ' + $regPort)
+}
+
+# Merge: HIGH VID first, then MEDIUM/LOW, then registry-only
+$scaleLines = @($scaleVidLines) + @($scaleLowLines) + @($scaleRegLines)
 
 $scaleFile = Join-Path $OutputDir 'sws_scales.txt'
-if ($scaleLines.Count -gt 0) {
-    $scaleLines | Set-Content $scaleFile -Encoding UTF8
-} else {
-    '' | Set-Content $scaleFile -Encoding UTF8
-}
-Write-Host "Scales written: $($scaleLines.Count) -> $scaleFile"
+if ($scaleLines.Count -gt 0) { $scaleLines | Set-Content $scaleFile -Encoding UTF8 }
+else { '' | Set-Content $scaleFile -Encoding UTF8 }
 
-Write-Host 'Detection complete.'
+DiagLog ''
+DiagLog ('=== COM PORTS: ' + $scaleLines.Count + ' ===')
+$scaleLines | ForEach-Object { DiagLog ('  ' + $_) }
+
+# ---- Write diagnostic log ----------------------------------------------------
+DiagLog ''
+DiagLog ('Detection complete. OutputDir: ' + $OutputDir)
+$diagLines | Set-Content $diagLog -Encoding UTF8
+Write-Host ('Diagnostic log: ' + $diagLog)
