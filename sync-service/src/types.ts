@@ -293,6 +293,14 @@ export interface PartyMaster {
   city:       string | null;
 }
 
+// ── Worker productivity summary (Phase: worker print) ──────────────────────
+export interface WorkerSummaryRow {
+  worker_code: string;
+  worker_name: string | null;
+  item_name:   string;
+  bag_count:   number;
+}
+
 export interface SyncStatusResponse {
   server_reachable: boolean;
   pending_entries: number;

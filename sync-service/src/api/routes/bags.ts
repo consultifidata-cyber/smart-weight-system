@@ -193,4 +193,116 @@ router.get('/today', (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /bags/worker-summary  — per-worker, per-item bag count for one shift
+ *
+ * Query params (both optional — default to current shift / current shift-date):
+ *   date   YYYY-MM-DD
+ *   shift  A | B | C
+ *
+ * Shift windows:
+ *   A = 06:00–13:59  (same day)
+ *   B = 14:00–21:59  (same day)
+ *   C = 22:00–05:59  (spans midnight)
+ *
+ * Shift C midnight wrap explained:
+ *   A Shift-C session is created on the day the shift STARTS (e.g. 2026-04-26)
+ *   and tagged entry_date='2026-04-26' shift='C'. Bags packed after midnight
+ *   (00:00–05:59 on 2026-04-27) still belong to that same session. Because we
+ *   filter by session.entry_date + session.shift (not by bag.created_at), no
+ *   timestamp arithmetic is needed — the ORM join handles it transparently.
+ *   The window_start/window_end in the response are for display only.
+ */
+router.get('/worker-summary', (req: Request, res: Response) => {
+  const { queries, config } = req.ctx;
+
+  // ── Current-shift helpers ──────────────────────────────────────────────────
+  function currentShift(): 'A' | 'B' | 'C' {
+    const h = new Date().getHours();
+    if (h >= 6  && h < 14) return 'A';
+    if (h >= 14 && h < 22) return 'B';
+    return 'C';
+  }
+
+  function currentShiftDate(): string {
+    const now = new Date();
+    // Shift C after midnight (00:00–05:59): shift started *yesterday*
+    if (now.getHours() < 6) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 1);
+      return d.toISOString().substring(0, 10);
+    }
+    return now.toISOString().substring(0, 10);
+  }
+
+  // ── Validate / default params ──────────────────────────────────────────────
+  const shiftParam = (req.query['shift'] as string | undefined)?.toUpperCase();
+  const dateParam  =  req.query['date']  as string | undefined;
+
+  const shift = shiftParam ?? currentShift();
+  const date  = dateParam  ?? currentShiftDate();
+
+  if (!['A', 'B', 'C'].includes(shift)) {
+    res.status(400).json({ status: 'error', error: `Invalid shift '${shift}'. Must be A, B or C.` });
+    return;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(Date.parse(date + 'T00:00:00'))) {
+    res.status(400).json({ status: 'error', error: `Invalid date '${date}'. Expected YYYY-MM-DD.` });
+    return;
+  }
+
+  // ── Shift window for response metadata ────────────────────────────────────
+  function shiftWindow(d: string, s: string): { window_start: string; window_end: string } {
+    if (s === 'A') return { window_start: `${d}T06:00:00`, window_end: `${d}T13:59:59` };
+    if (s === 'B') return { window_start: `${d}T14:00:00`, window_end: `${d}T21:59:59` };
+    // Shift C: starts 22:00 on date d, ends 05:59:59 on d+1
+    const next = new Date(d + 'T00:00:00');
+    next.setDate(next.getDate() + 1);
+    const nextDate = next.toISOString().substring(0, 10);
+    return { window_start: `${d}T22:00:00`, window_end: `${nextDate}T05:59:59` };
+  }
+
+  try {
+    const dbRows = queries.getWorkerSummary(config.stationId, date, shift);
+    const { window_start, window_end } = shiftWindow(date, shift);
+
+    // Truncate worker name to first 2 words — fits on 50 mm label width
+    const shortName = (name: string | null): string =>
+      name ? name.trim().split(/\s+/).slice(0, 2).join(' ') : '';
+
+    const rows = dbRows.map(r => ({
+      worker_id:   r.worker_code,
+      worker_name: shortName(r.worker_name),
+      item:        r.item_name,
+      bags:        r.bag_count,
+    }));
+
+    // Worker subtotals + grand total computed here (not in SQL) — explicit aggregation
+    const subtotalMap = new Map<string, number>();
+    for (const r of rows) {
+      subtotalMap.set(r.worker_id, (subtotalMap.get(r.worker_id) ?? 0) + r.bags);
+    }
+    const worker_subtotals = Array.from(subtotalMap.entries())
+      .map(([worker_id, bags]) => ({ worker_id, bags }));
+    const grand_total = worker_subtotals.reduce((sum, w) => sum + w.bags, 0);
+
+    res.json({
+      station:         config.stationId,
+      date,
+      shift,
+      window_start,
+      window_end,
+      rows,
+      worker_subtotals,
+      grand_total,
+    });
+
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error({ error, date, shift }, 'Failed to get worker summary');
+    res.status(500).json({ status: 'error', error });
+  }
+});
+
 export const bagsRouter = router;

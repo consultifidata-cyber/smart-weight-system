@@ -14,6 +14,7 @@ import type {
   DispatchDoc,
   DispatchLineRow,
   PartyMaster,
+  WorkerSummaryRow,
 } from '../types.js';
 
 export class Queries {
@@ -732,6 +733,36 @@ export class Queries {
   countBagsToday(date: string): number {
     const row = this._countBagsToday.get(date) as { count: number };
     return row.count;
+  }
+
+  /**
+   * Per-worker, per-item bag count for one shift on one date.
+   *
+   * Filters by fg_session.entry_date + fg_session.shift — which means Shift C
+   * is handled naturally: sessions are always tagged with the date the shift
+   * STARTED (the 22:00 side of midnight), so no timestamp arithmetic is needed.
+   *
+   * Only workers with ≥1 bag are returned (GROUP BY naturally excludes zeros).
+   * Sorted by worker_code ASC, item_name ASC — ready for the label renderer.
+   */
+  getWorkerSummary(stationId: string, date: string, shift: string): WorkerSummaryRow[] {
+    return this.db.prepare(`
+      SELECT
+          b.worker_code_1          AS worker_code,
+          wm.worker_name,
+          im.item_name,
+          COUNT(b.bag_id)          AS bag_count
+      FROM   fg_bag         b
+      JOIN   fg_session     s  ON  s.session_id  = b.session_id
+      JOIN   item_master    im ON  im.item_id     = b.item_id
+      LEFT JOIN worker_master wm ON wm.worker_code = b.worker_code_1
+      WHERE  s.station_id      = ?
+        AND  s.entry_date      = ?
+        AND  s.shift           = ?
+        AND  b.worker_code_1   IS NOT NULL
+      GROUP  BY b.worker_code_1, b.item_id
+      ORDER  BY b.worker_code_1 ASC, im.item_name ASC
+    `).all(stationId, date, shift) as WorkerSummaryRow[];
   }
 
   // ══════════════════════════════════════════════════════════════════════════
