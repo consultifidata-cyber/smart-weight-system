@@ -265,20 +265,28 @@ function weightApp() {
 
     async _doReadinessCheck() {
       var issues = [];
+
+      // ── Print service + hardware status ──────────────────────────────────
       try {
         var res  = await this._fetchWithTimeout(CONFIG.printServiceUrl + '/system/status', {}, 5000);
         var data = await res.json();
         if (data.printer && data.printer.state !== 'connected') {
-          issues.push('PRINTER NOT CONNECTED');
+          issues.push('Label printer not ready — power it ON and check USB cable, then Retry');
         }
         if (data.scale && !data.scale.connected && !data.scale.simulate) {
-          issues.push('SCALE NOT CONNECTED');
+          issues.push('Scale not responding — check USB-serial cable and power, then Retry');
         }
       } catch (e) {
-        issues.push('SYSTEM SERVICES NOT RESPONDING');
+        issues.push('Print service not reachable (port 5001) — services may still be starting, wait 30s then Retry');
       }
-      if (this.products.length === 0) issues.push('PRODUCT LIST NOT LOADED');
-      if (this.workers.length === 0)  issues.push('WORKER LIST NOT LOADED');
+
+      // ── Sync service — products and workers from Django ───────────────────
+      if (this.products.length === 0) {
+        issues.push('Product list empty — sync service not connected to server, check .env DJANGO_SERVER_URL');
+      }
+      if (this.workers.length === 0) {
+        issues.push('Worker list empty — check DJANGO_API_TOKEN in .env and server connection');
+      }
 
       this.systemReadyIssues  = issues;
       this.systemReady        = issues.length === 0;

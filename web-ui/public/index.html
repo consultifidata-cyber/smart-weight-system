@@ -51,7 +51,7 @@
       <div class="system-gate-box">
         <div class="system-gate-icon">⚠</div>
         <div class="system-gate-title">SYSTEM NOT READY</div>
-        <div class="system-gate-subtitle">CALL SUPERVISOR</div>
+        <div class="system-gate-subtitle">Fix the issue below, then tap Retry</div>
         <div class="system-gate-issues">
           <template x-for="issue in systemReadyIssues" :key="issue">
             <div class="system-gate-issue" x-text="issue"></div>
@@ -59,7 +59,6 @@
         </div>
         <div class="system-gate-retry">
           <button class="system-gate-retry-btn" @click="checkSystemReady()">↻ Retry</button>
-          <button class="system-gate-override-btn" @click="proceedAnyway()">Supervisor Override</button>
         </div>
       </div>
     </div>
