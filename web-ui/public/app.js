@@ -76,13 +76,21 @@ function weightApp() {
     systemReadyIssues:  [],
     systemChecking:     false,  // true while a readiness check is in flight
     _systemStartupRetry: 0,
-    _readinessRetryId:  null,      // kept for backward compat — unused with new monitor
-    _readinessMonitorId: null,     // setInterval for continuous readiness monitoring
-    _systemLastOkAt:    0,         // epoch ms of last successful readiness check
+    _readinessRetryId:  null,
+    _readinessMonitorId: null,
+    _systemLastOkAt:    0,
     _consecutiveReadinessFailures: 0,
-    systemBlipping:     false,     // true = brief blip, show inline toast only
+    systemBlipping:     false,
     printToast:         { show: false, msg: '' },
     pinModal:           { show: false, input: '', error: '' },
+    // H1 — live device state from /system/status (3s poll)
+    scaleConnected:         false,
+    printerCountdown:       null,  // null = not counting; number = seconds remaining
+    scaleCountdown:         null,
+    _printerCountdownId:    null,
+    _scaleCountdownId:      null,
+    // H2/H3 — shift + clock
+    _clockTick:             0,     // incremented every minute; makes shiftClockLabel reactive
 
     // ── Phase H: shift checklist ──
     shiftConfirmed:     false,
@@ -146,6 +154,13 @@ function weightApp() {
         if (sessionStorage.getItem('shiftConfirmed')) this.shiftConfirmed = true;
       } catch (e) { /* ignore */ }
 
+      // H2 — shift auto-confirmed; no shift-gate prompt
+      this.shiftConfirmed = true;
+
+      // H3 — clock ticker updates shiftClockLabel every minute
+      var self2 = this;
+      setInterval(function () { self2._clockTick++; }, 60000);
+
       // Start continuous readiness monitor (5 s interval, hysteresis)
       this.startReadinessMonitor();
     },
@@ -156,6 +171,8 @@ function weightApp() {
       clearInterval(this._syncStatusPollId);
       clearInterval(this._syncHealthPollId);
       clearInterval(this._readinessMonitorId);
+      clearInterval(this._printerCountdownId);
+      clearInterval(this._scaleCountdownId);
       clearTimeout(this._readinessRetryId);
       clearTimeout(this._autoResetId);
     },
@@ -323,7 +340,7 @@ function weightApp() {
         var res  = await this._fetchWithTimeout(CONFIG.printServiceUrl + '/system/status', {}, 5000);
         var data = await res.json();
         if (data.printer && data.printer.state !== 'connected') {
-          issues.push('Label printer not ready — power it ON and check the USB cable.');
+          issues.push('Label printer not ready - power it ON and check the USB cable.');
         }
         // P1.1 fix: use data.scale.state (not data.scale.connected)
         if (data.scale && data.scale.state !== 'connected' && !data.scale.simulate) {
@@ -364,7 +381,7 @@ function weightApp() {
         this._consecutiveReadinessFailures = 0;
         this.closePinModal();
       } else {
-        this.pinModal.error = 'Wrong PIN — try again.';
+        this.pinModal.error = 'Wrong PIN - try again.';
         this.pinModal.input = '';
       }
     },
@@ -544,20 +561,32 @@ function weightApp() {
     },
 
     pollHealth() {
+      // H1.3 — read /system/status for live printer + scale state (3s poll)
       var self = this;
-      this._fetchWithTimeout(CONFIG.printServiceUrl + '/print/health')
+      this._fetchWithTimeout(CONFIG.printServiceUrl + '/system/status', {}, 4000)
         .then(function (res) { return res.json(); })
         .then(function (data) {
-          // Definitive response from service — trust it
-          self.printerConnected = !!(data.printer && data.printer.connected);
+          var prevPrinter = self.printerConnected;
+          var prevScale   = self.scaleConnected;
+
+          self.printerConnected = !!(data.printer && data.printer.state === 'connected');
+          self.scaleConnected   = !!(data.scale   && data.scale.state   === 'connected');
           self._healthPollFails = 0;
+
+          // Start/stop countdown on state change
+          if (prevPrinter && !self.printerConnected) self._startCountdown('printer');
+          if (!prevPrinter && self.printerConnected)  self._stopCountdown('printer');
+          if (prevScale   && !self.scaleConnected)   self._startCountdown('scale');
+          if (!prevScale  && self.scaleConnected)    self._stopCountdown('scale');
         })
         .catch(function () {
-          // Network error or timeout — only flip dot red after 3 consecutive
-          // failures so a single slow response doesn't mislead the operator.
           self._healthPollFails = (self._healthPollFails || 0) + 1;
           if (self._healthPollFails >= 3) {
+            var prevP = self.printerConnected, prevS = self.scaleConnected;
             self.printerConnected = false;
+            self.scaleConnected   = false;
+            if (prevP) self._startCountdown('printer');
+            if (prevS) self._startCountdown('scale');
           }
         });
 
@@ -565,6 +594,30 @@ function weightApp() {
         .then(function (res) { return res.json(); })
         .then(function (data) { self.syncConnected = data.status === 'ok'; })
         .catch(function () { self.syncConnected = false; });
+    },
+
+    // H4 — reconnect countdown per device
+    _startCountdown(device) {
+      var self = this;
+      var countdownKey = device + 'Countdown';
+      var timerId      = '_' + device + 'CountdownId';
+      if (self[timerId]) clearInterval(self[timerId]);
+      self[countdownKey] = 30;
+      self[timerId] = setInterval(function () {
+        if (self[countdownKey] > 0) { self[countdownKey]--; }
+        if (self[countdownKey] <= 0) {
+          // Force probe by triggering a fresh poll
+          self[countdownKey] = 30;
+          self.pollHealth();
+        }
+      }, 1000);
+    },
+
+    _stopCountdown(device) {
+      var timerId      = '_' + device + 'CountdownId';
+      var countdownKey = device + 'Countdown';
+      if (this[timerId]) { clearInterval(this[timerId]); this[timerId] = null; }
+      this[countdownKey] = null;
     },
 
     // ══════════════════════════════════════════════════════════════
@@ -597,6 +650,7 @@ function weightApp() {
               weight_gm: weightGm,
               worker_code_1: this.selectedWorker1,
               worker_code_2: this.selectedWorker2 || null,
+              shift: this.currentShift,
             }),
           }
         );
@@ -678,6 +732,18 @@ function weightApp() {
           );
 
           var printData = await printRes.json();
+
+          // H7 — abort retry loop on printer_disconnected: job must NOT queue
+          if (printRes.status === 503 && printData.error === 'printer_disconnected') {
+            this.state = 'PRINT_FAILED';
+            this._showErrorModal(
+              '⚠  PRINTER NOT CONNECTED',
+              'Printer is not connected.\n\nCheck the USB cable, then tap RETRY PRINT.',
+              true
+            );
+            this._playBeep('error');
+            return;
+          }
 
           if (printRes.ok && printData.status === 'ok') {
             this.state = 'PRINTED';
@@ -872,31 +938,60 @@ function weightApp() {
       return 'status-disconnected';
     },
 
+    // H2 — current shift from local time (no prompt)
+    get currentShift() {
+      var h = new Date().getHours();
+      return h >= 6 && h < 14 ? 'A' : h >= 14 && h < 22 ? 'B' : 'C';
+    },
+
+    // H3 — "Shift A · 14:23" — uses _clockTick for minute-level reactivity
+    get shiftClockLabel() {
+      var _ = this._clockTick;  // reactive dependency — re-evaluates every minute
+      var now = new Date();
+      var h = now.getHours(), m = now.getMinutes();
+      var shift = h >= 6 && h < 14 ? 'A' : h >= 14 && h < 22 ? 'B' : 'C';
+      return 'Shift ' + shift + ' · ' + String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+    },
+
+    // H4 — printer pill text with countdown
     get printerStatusText() {
-      return this.printerConnected ? 'Printer OK' : 'Printer OFF';
+      if (!this.printerConnected) {
+        if (this.printerCountdown !== null) return 'DISCONNECTED · ' + this.printerCountdown + 's';
+        return 'Printer OFF';
+      }
+      return 'Printer OK';
     },
 
     get syncStatusText() {
       return this.syncConnected ? 'Server OK' : 'Server OFF';
     },
 
-    // Phase F: bigger, clearer print button text
+    // H5 — print button states, explicit priority order
     get printButtonText() {
-      if (this.state === 'PRINTING')      return '⏳  PRINTING…  PLEASE WAIT';
-      if (this.state === 'PRINT_RETRYING') return '⏳  RETRYING  (' + this.printAttempt + ' / ' + this.printMaxAttempts + ')';
-      if (this.state === 'PRINTED')       return '✓  PRINT SUCCESS';
-      if (this.state === 'PRINT_FAILED')  return '⚠  RETRY PRINT';
-      if (this.weightStatus !== 'ok')     return '⚠  Scale Not Ready';
-      if (!this.printerConnected)         return '⚠  Printer Not Connected';
-      if (!this.selectedPackId)           return 'Select Product First';
-      if (!this.selectedWorker1)          return 'Select Worker First';
-      if (!this.stable)                   return 'Waiting for Stable Weight…';
+      // Active states
+      if (this.state === 'PRINTING')       return 'Printing...';
+      if (this.state === 'PRINT_RETRYING') return 'Retrying (' + this.printAttempt + '/' + this.printMaxAttempts + ')';
+      if (this.state === 'PRINTED')        return '✓  Print Success';
+      if (this.state === 'PRINT_FAILED')   return '⚠  Retry Print';
+      // Device disconnected (highest priority blocking state)
+      if (!this.printerConnected)          return '⚠  Printer Not Connected';
+      if (this.weightStatus === 'disconnected' || !this.weightServiceReachable) return '⚠  Scale Not Connected';
+      // Missing selections
+      if (!this.selectedPackId)            return 'Select Product First';
+      if (!this.selectedWorker1)           return 'Select Worker First';
+      // Weight not stable
+      if (this.weightStatus !== 'ok')      return 'Scale Not Ready';
+      if (!this.stable)                    return 'Waiting for Stable Weight...';
       return 'PRINT';
     },
 
     get printButtonDisabled() {
-      if (this.state === 'PRINT_FAILED') return false;
-      if (this.state === 'PRINT_RETRYING') return true;
+      if (this.state === 'PRINT_FAILED') return false;  // Retry Print is enabled
+      if (this.state === 'PRINTING' || this.state === 'PRINT_RETRYING') return true;
+      if (this.state === 'PRINTED') return true;
+      // Block on device disconnect
+      if (!this.printerConnected) return true;
+      if (this.weightStatus === 'disconnected' || !this.weightServiceReachable) return true;
       return !this.canPrint;
     },
 
@@ -1102,7 +1197,7 @@ function weightApp() {
           m.data = json;
         }
       } catch (e) {
-        m.error = 'Could not reach sync service — is it running?';
+        m.error = 'Could not reach sync service - is it running?';
       } finally {
         m.loading = false;
       }
@@ -1143,7 +1238,7 @@ function weightApp() {
           self._showErrorModal('PRINT FAILED', errJson.error || 'Printer returned an error.', false);
         }
       } catch (e) {
-        self._showErrorModal('PRINT FAILED', 'Could not reach print service — is it running?', false);
+        self._showErrorModal('PRINT FAILED', 'Could not reach print service - is it running?', false);
       } finally {
         m.printing = false;
       }

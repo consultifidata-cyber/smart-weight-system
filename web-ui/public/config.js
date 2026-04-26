@@ -6,7 +6,7 @@ var CONFIG = {
   productApiUrl:    'http://localhost:5002/products',
   workerApiUrl:     'http://localhost:5002/workers',
   weightPollMs:     1000,
-  healthPollMs:     10000,
+  healthPollMs:     3000,   // poll /system/status every 3s for live disconnect detection
   autoResetMs:      4000,    // Phase F: 4 s success display (was 2 s)
   fetchTimeoutMs:   3000,
   plantCode:        'BNJRS10',

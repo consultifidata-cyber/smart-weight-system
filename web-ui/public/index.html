@@ -1,4 +1,4 @@
-<!-- BUILD_V2_2_0_RC1 -->
+<!-- BUILD_V2_2_0_RC1_1 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -188,59 +188,8 @@
       </div>
     </div>
 
-    <!-- ── System Not Ready overlay ─────────────────────────────────────────── -->
-    <div class="system-gate" x-show="systemReadyChecked && !systemReady" x-cloak>
-      <div class="system-gate-box">
-        <div class="system-gate-icon">⚠</div>
-        <div class="system-gate-title">SYSTEM NOT READY</div>
-        <div class="system-gate-subtitle" x-text="systemChecking ? 'Checking — please wait…' : 'Fix the issue below, then tap Retry'"></div>
-        <div class="system-gate-issues">
-          <template x-for="issue in systemReadyIssues" :key="issue">
-            <div class="system-gate-issue" x-text="issue"></div>
-          </template>
-        </div>
-        <div class="system-gate-retry">
-          <button class="system-gate-retry-btn"
-            :disabled="systemChecking"
-            @click="checkSystemReady()"
-            x-text="systemChecking ? '↻ Checking…' : '↻ Retry'">
-          </button>
-          <button class="system-gate-pin-btn" @click="openPinOverride()">
-            Supervisor Override
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Shift Checklist ───────────────────────────────────────────────────── -->
-    <div class="shift-gate" x-show="systemReady && !shiftConfirmed" x-cloak>
-      <div class="shift-gate-box">
-        <div class="shift-gate-title">SHIFT START CHECK</div>
-        <div class="shift-gate-subtitle">Confirm before starting production</div>
-        <div class="shift-gate-checks">
-          <label class="shift-check-item">
-            <input type="checkbox" x-model="shiftChecks.printer">
-            <span class="shift-check-icon">🖨</span>
-            <span class="shift-check-label">Label printer is ON and ready</span>
-          </label>
-          <label class="shift-check-item">
-            <input type="checkbox" x-model="shiftChecks.scale">
-            <span class="shift-check-icon">⚖</span>
-            <span class="shift-check-label">Weighing scale is ON and stable</span>
-          </label>
-          <label class="shift-check-item">
-            <input type="checkbox" x-model="shiftChecks.internet">
-            <span class="shift-check-icon">🌐</span>
-            <span class="shift-check-label">Internet / server is reachable</span>
-          </label>
-        </div>
-        <button class="shift-start-btn" :disabled="!shiftAllChecked"
-          :class="{ 'shift-start-ready': shiftAllChecked }" @click="confirmShift()">
-          ✓ START SHIFT
-        </button>
-        <button class="shift-skip-btn" @click="autoFillChecklist()">Auto-detect status</button>
-      </div>
-    </div>
+    <!-- H1.4 — System-gate REMOVED: status pills replace full-screen overlay -->
+    <!-- H2   — Shift-gate REMOVED: shift auto-computed from local time -->
 
     <!-- ── Sync stopped banner ──────────────────────────────────────────────── -->
     <div class="sync-health-banner" x-show="syncHealth === 'red'" x-cloak>
@@ -261,7 +210,8 @@
           <span class="dot-circle">●</span>
           <span class="dot-label" x-text="weightStatusText"></span>
         </div>
-        <div class="sbar-dot" :class="printerConnected ? 'dot-green' : 'dot-red'"
+        <div class="sbar-dot"
+          :class="printerConnected ? 'dot-green' : 'dot-red'"
           :title="printerStatusText">
           <span class="dot-circle">●</span>
           <span class="dot-label" x-text="printerStatusText"></span>
@@ -270,6 +220,8 @@
           <span class="dot-circle">●</span>
           <span class="dot-label" x-text="syncHealthText"></span>
         </div>
+        <!-- H3 — shift + clock -->
+        <div class="sbar-shift-clock" x-text="shiftClockLabel"></div>
       </div>
 
       <!-- Workers button + training toggle -->

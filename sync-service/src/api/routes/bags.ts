@@ -23,7 +23,7 @@ const router = Router();
 router.post('/add', (req: Request, res: Response) => {
   const { queries, config } = req.ctx;
 
-  const { pack_config_id, weight_gm, worker_code_1, worker_code_2 } = req.body;
+  const { pack_config_id, weight_gm, worker_code_1, worker_code_2, shift } = req.body;
 
   if (!pack_config_id) {
     res.status(400).json({ status: 'error', error: 'pack_config_id is required' });
@@ -70,7 +70,8 @@ router.post('/add', (req: Request, res: Response) => {
         station_id: config.stationId,
         plant_id: config.plantId,
         entry_date: today,
-        shift: null,
+        shift: (shift && ['A','B','C'].includes(String(shift).toUpperCase()))
+          ? String(shift).toUpperCase() : null,
         item_id: product.item_id,
         pack_config_id: pack_config_id,
         pack_name: product.pack_name,

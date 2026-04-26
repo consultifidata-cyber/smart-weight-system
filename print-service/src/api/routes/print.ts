@@ -149,6 +149,18 @@ router.post('/print', async (req: Request, res: Response) => {
       return;
     }
 
+    // H1.2 — Pre-flight: reject job immediately if printer is not connected.
+    // Prevents silent job queuing in the Windows spooler when printer is unplugged.
+    // The background probe (5 s interval) keeps this cache current.
+    if (!getCachedHealth()) {
+      res.status(503).json({
+        status:  'error',
+        error:   'printer_disconnected',
+        message: 'Printer is not connected. Check USB cable.',
+      });
+      return;
+    }
+
     // Generate entry ID and QR content
     const entryId = generateEntryId(body.stationId);
     const qrContent = body.qrContent || generateQRContent(body.product, body.weight, body.stationId);
