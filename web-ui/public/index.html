@@ -1,4 +1,4 @@
-<!-- BUILD_V2_2_0_RC1_1 -->
+<!-- BUILD_V2_3_0_RC1 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -141,6 +141,79 @@
       </div>
     </div>
 
+    <!-- ── All-workers report modal (v2.3.0, ENABLE_REPORTS only) ──────────────── -->
+    <div class="rpt-overlay" x-show="enableReports && reportsModal.show" x-cloak
+         @click.self="closeReportsModal()"
+         @keydown.escape.window="closeReportsModal()">
+      <div class="rpt-box">
+        <div class="rpt-header">
+          <span class="rpt-title">📊 Worker Production Report</span>
+          <button class="rpt-close" @click="closeReportsModal()">✕</button>
+        </div>
+        <div class="rpt-controls">
+          <div class="rpt-field">
+            <label class="rpt-label">Date</label>
+            <select class="rpt-select" x-model="reportsModal.selectedDate">
+              <template x-for="opt in reportDateOptions" :key="opt.value">
+                <option :value="opt.value" x-text="opt.label"></option>
+              </template>
+            </select>
+          </div>
+          <div class="rpt-field">
+            <label class="rpt-label">Shift</label>
+            <select class="rpt-select" x-model="reportsModal.selectedShift">
+              <option value="ALL">All Shifts</option>
+              <option value="A">A  (06:00–13:59)</option>
+              <option value="B">B  (14:00–21:59)</option>
+              <option value="C">C  (22:00–05:59)</option>
+            </select>
+          </div>
+        </div>
+        <div class="rpt-error" x-show="reportsModal.error" x-text="reportsModal.error"></div>
+        <div class="rpt-actions">
+          <button class="rpt-cancel-btn" @click="closeReportsModal()">Cancel</button>
+          <button class="rpt-print-btn"
+            :disabled="reportsModal.loading"
+            @click="printAllWorkersReport()">
+            <span x-show="reportsModal.loading">Loading…</span>
+            <span x-show="!reportsModal.loading">🖨 Print Report</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Worker-specific report modal (v2.3.0) ─────────────────────────────── -->
+    <div class="rpt-overlay" x-show="enableReports && workerReportModal.show" x-cloak
+         @click.self="closeWorkerReportModal()"
+         @keydown.escape.window="closeWorkerReportModal()">
+      <div class="rpt-box">
+        <div class="rpt-header">
+          <span class="rpt-title">📊 <span x-text="workerReportModal.workerName + ' (' + workerReportModal.workerCode + ')'"></span></span>
+          <button class="rpt-close" @click="closeWorkerReportModal()">✕</button>
+        </div>
+        <div class="rpt-controls">
+          <div class="rpt-field">
+            <label class="rpt-label">Date</label>
+            <select class="rpt-select" x-model="workerReportModal.selectedDate">
+              <template x-for="opt in reportDateOptions" :key="opt.value">
+                <option :value="opt.value" x-text="opt.label"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+        <div class="rpt-error" x-show="workerReportModal.error" x-text="workerReportModal.error"></div>
+        <div class="rpt-actions">
+          <button class="rpt-cancel-btn" @click="closeWorkerReportModal()">Cancel</button>
+          <button class="rpt-print-btn"
+            :disabled="workerReportModal.loading"
+            @click="printWorkerReport()">
+            <span x-show="workerReportModal.loading">Loading…</span>
+            <span x-show="!workerReportModal.loading">🖨 Print Summary</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Print error modal ─────────────────────────────────────────────────── -->
     <div class="error-modal" x-show="errorModal.show" x-cloak>
       <div class="error-modal-box">
@@ -220,6 +293,11 @@
           <span class="dot-circle">●</span>
           <span class="dot-label" x-text="syncHealthText"></span>
         </div>
+        <!-- v2.3.0 — Reports button (only when ENABLE_REPORTS=true) -->
+        <button class="sbar-reports-btn" x-show="enableReports"
+          @click="openReportsModal()" title="Print worker production report">
+          📊
+        </button>
         <!-- H3 — shift + clock -->
         <div class="sbar-shift-clock" x-text="shiftClockLabel"></div>
       </div>
@@ -320,13 +398,21 @@
           <div class="worker-grid-pinned"
             :class="{ 'grid-few': pinnedWorkerObjects.length <= 9 }">
             <template x-for="w in pinnedWorkerObjects" :key="w.worker_code">
-              <button class="worker-pin-btn"
-                :class="{ selected: selectedWorker1 === w.worker_code }"
-                :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'"
-                @click="selectWorkerCode(w.worker_code, false)">
-                <span class="wpin-code" x-text="w.worker_code"></span>
-                <span class="wpin-name" x-text="w.worker_name.split(' ')[0]"></span>
-              </button>
+              <div class="wpin-wrapper">
+                <button class="worker-pin-btn"
+                  :class="{ selected: selectedWorker1 === w.worker_code }"
+                  :disabled="state === 'PRINTING' || state === 'PRINTED' || state === 'PRINT_RETRYING'"
+                  @click="selectWorkerCode(w.worker_code, false)">
+                  <span class="wpin-code" x-text="w.worker_code"></span>
+                  <span class="wpin-name" x-text="w.worker_name.split(' ')[0]"></span>
+                </button>
+                <!-- v2.3.0: per-worker report icon — only when reports enabled -->
+                <button class="wpin-report-icon" x-show="enableReports"
+                  @click.stop="openWorkerReportModal(w.worker_code, w.worker_name.split(' ')[0])"
+                  title="Print summary for this worker">
+                  📊
+                </button>
+              </div>
             </template>
           </div>
 

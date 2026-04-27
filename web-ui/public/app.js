@@ -91,6 +91,18 @@ function weightApp() {
     _scaleCountdownId:      null,
     // H2/H3 — shift + clock
     _clockTick:             0,     // incremented every minute; makes shiftClockLabel reactive
+    // v2.3.0 — feature flags (loaded from /api/flags on init)
+    enableReports:          false,
+    // v2.3.0 — all-workers report modal
+    reportsModal: {
+      show: false, loading: false, error: '',
+      selectedDate: '', selectedShift: 'ALL',
+    },
+    // v2.3.0 — single-worker report modal
+    workerReportModal: {
+      show: false, loading: false, error: '',
+      workerCode: '', workerName: '', selectedDate: '',
+    },
 
     // ── Phase H: shift checklist ──
     shiftConfirmed:     false,
@@ -153,6 +165,9 @@ function weightApp() {
       try {
         if (sessionStorage.getItem('shiftConfirmed')) this.shiftConfirmed = true;
       } catch (e) { /* ignore */ }
+
+      // Load feature flags from server (.env → /api/flags)
+      this._loadFlags();
 
       // H2 — shift auto-confirmed; no shift-gate prompt
       this.shiftConfirmed = true;
@@ -1241,6 +1256,146 @@ function weightApp() {
         self._showErrorModal('PRINT FAILED', 'Could not reach print service - is it running?', false);
       } finally {
         m.printing = false;
+      }
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // v2.3.0 — Feature flags
+    // ══════════════════════════════════════════════════════════════
+
+    async _loadFlags() {
+      try {
+        var res  = await fetch('/api/flags');
+        var data = await res.json();
+        this.enableReports = !!data.enableReports;
+      } catch (e) { /* default false — safe */ }
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // v2.3.0 — Reports date helpers
+    // ══════════════════════════════════════════════════════════════
+
+    // Returns array of { value: 'YYYY-MM-DD', label: 'Today · 27 Apr' | '26 Apr' }
+    get reportDateOptions() {
+      var opts = [];
+      var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      for (var i = 0; i < 7; i++) {
+        var d = new Date(); d.setDate(d.getDate() - i);
+        var iso = d.toISOString().substring(0, 10);
+        var label = d.getDate() + ' ' + MONTHS[d.getMonth()];
+        if (i === 0) label = 'Today · ' + label;
+        else if (i === 1) label = 'Yesterday · ' + label;
+        opts.push({ value: iso, label: label });
+      }
+      return opts;
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // v2.3.0 — All-workers report modal
+    // ══════════════════════════════════════════════════════════════
+
+    openReportsModal() {
+      var today = new Date().toISOString().substring(0, 10);
+      this.reportsModal = { show: true, loading: false, error: '', selectedDate: today, selectedShift: 'ALL' };
+    },
+    closeReportsModal() { this.reportsModal.show = false; },
+
+    async printAllWorkersReport() {
+      var m = this.reportsModal;
+      m.loading = true; m.error = '';
+      try {
+        // 1. Fetch data from Django
+        var djangoUrl = CONFIG.syncServiceUrl.replace(':5002', ':8000')
+          .replace('localhost', window.location.hostname)
+          .replace('127.0.0.1', window.location.hostname);
+        // Use DJANGO_SERVER_URL if available via flags endpoint (fallback: derive from config)
+        var flagsRes  = await fetch('/api/flags');
+        var flags     = await flagsRes.json();
+        var baseUrl   = flags.djangoServerUrl || CONFIG.syncServiceUrl.replace(':5002', ':8000');
+
+        var params = '?date=' + m.selectedDate + '&shift=' + m.selectedShift;
+        var rRes   = await this._fetchWithTimeout(baseUrl + '/api/reports/workers/' + params, {
+          headers: { 'Authorization': 'Token ' + (flags.djangoToken || '') },
+        }, 8000);
+        if (!rRes.ok) {
+          var err = await rRes.json().catch(function() { return {}; });
+          m.error = err.error || ('Server error ' + rRes.status);
+          return;
+        }
+        var report = await rRes.json();
+
+        // 2. Send to printer
+        var pRes = await this._fetchWithTimeout(
+          CONFIG.printServiceUrl + '/print/report-workers',
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) },
+          30000,
+        );
+        if (!pRes.ok) {
+          var pe = await pRes.json().catch(function() { return {}; });
+          m.error = pe.message || pe.error || 'Printer error';
+          return;
+        }
+        var pr = await pRes.json();
+        this._showPrintToast('Report sent to printer (' + pr.labels_printed + ' labels)');
+        var self = this;
+        setTimeout(function () { self.closeReportsModal(); }, 2000);
+      } catch (e) {
+        m.error = 'Could not print report — check connection.';
+      } finally {
+        m.loading = false;
+      }
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // v2.3.0 — Worker-specific report modal
+    // ══════════════════════════════════════════════════════════════
+
+    openWorkerReportModal(workerCode, workerName) {
+      var today = new Date().toISOString().substring(0, 10);
+      this.workerReportModal = {
+        show: true, loading: false, error: '',
+        workerCode: workerCode, workerName: workerName, selectedDate: today,
+      };
+    },
+    closeWorkerReportModal() { this.workerReportModal.show = false; },
+
+    async printWorkerReport() {
+      var m = this.workerReportModal;
+      m.loading = true; m.error = '';
+      try {
+        var flagsRes = await fetch('/api/flags');
+        var flags    = await flagsRes.json();
+        var baseUrl  = flags.djangoServerUrl || CONFIG.syncServiceUrl.replace(':5002', ':8000');
+
+        var rRes = await this._fetchWithTimeout(
+          baseUrl + '/api/reports/worker/' + encodeURIComponent(m.workerCode) + '/?date=' + m.selectedDate,
+          { headers: { 'Authorization': 'Token ' + (flags.djangoToken || '') } },
+          8000,
+        );
+        if (!rRes.ok) {
+          var err = await rRes.json().catch(function() { return {}; });
+          m.error = err.error || ('Server error ' + rRes.status);
+          return;
+        }
+        var report = await rRes.json();
+
+        var pRes = await this._fetchWithTimeout(
+          CONFIG.printServiceUrl + '/print/report-worker',
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) },
+          15000,
+        );
+        if (!pRes.ok) {
+          var pe = await pRes.json().catch(function() { return {}; });
+          m.error = pe.message || pe.error || 'Printer error';
+          return;
+        }
+        this._showPrintToast('Summary printed for ' + m.workerCode);
+        var self = this;
+        setTimeout(function () { self.closeWorkerReportModal(); }, 2000);
+      } catch (e) {
+        m.error = 'Could not print summary — check connection.';
+      } finally {
+        m.loading = false;
       }
     },
 

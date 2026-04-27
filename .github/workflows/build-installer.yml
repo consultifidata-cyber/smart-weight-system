@@ -177,7 +177,7 @@ jobs:
       # ── 10. Build-time assertion — web-ui must contain build marker ──────────────
       - name: Assert web-ui build marker present
         run: |
-          $marker = "BUILD_V2_2_0_RC1_1"
+          $marker = "BUILD_V2_3_0_RC1"
           $content = Get-Content "web-ui\public\index.html" -Raw
           if ($content -notmatch [regex]::Escape($marker)) {
             throw "web-ui/public/index.html is missing build marker '$marker' — stale bundle may have been used"

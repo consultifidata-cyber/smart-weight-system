@@ -756,3 +756,60 @@ html, body { overflow: hidden; height: 100vh; width: 100vw; }
 
 /* H4 — disconnected pills pulse red */
 .dot-red { background: var(--red); animation: pulse-red 1.5s infinite; }
+
+/* ── v2.3.0 — Reports button + modals ──────────────────────────────────────── */
+
+/* Top-bar reports button */
+.sbar-reports-btn {
+  background: transparent; border: 1px solid rgba(255,255,255,.3);
+  border-radius: 6px; padding: 2px 8px; cursor: pointer;
+  font-size: .9rem; color: white; align-self: center;
+}
+.sbar-reports-btn:hover { background: rgba(255,255,255,.1); }
+
+/* Worker tile wrapper + report icon overlay */
+.wpin-wrapper { position: relative; display: inline-block; }
+.wpin-report-icon {
+  position: absolute; top: 2px; right: 2px;
+  background: rgba(0,0,0,.25); border: none; border-radius: 4px;
+  font-size: .7rem; padding: 1px 3px; cursor: pointer; line-height: 1;
+  color: white; z-index: 1;
+}
+.wpin-report-icon:hover { background: rgba(0,0,0,.5); }
+
+/* Report modal — shares pin-overlay pattern */
+.rpt-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.75);
+  z-index: 9400; display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.rpt-box {
+  background: var(--card); border-radius: 16px;
+  width: min(520px, 90vw); overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.rpt-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid #e2e8f0;
+}
+.rpt-title  { font-size: 1.05rem; font-weight: 800; color: var(--blue); }
+.rpt-close  { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--muted); }
+.rpt-controls {
+  display: flex; gap: 14px; padding: 14px 18px;
+  flex-wrap: wrap; border-bottom: 1px solid #e2e8f0;
+}
+.rpt-field  { display: flex; flex-direction: column; gap: 4px; }
+.rpt-label  { font-size: .75rem; font-weight: 700; color: var(--muted); }
+.rpt-select {
+  padding: 7px 10px; font-size: .9rem;
+  border: 1.5px solid #cbd5e1; border-radius: 8px; background: #f8fafc;
+  min-width: 160px;
+}
+.rpt-error  { color: var(--red); font-size: .85rem; font-weight: 700; padding: 8px 18px; }
+.rpt-actions {
+  display: flex; gap: 10px; padding: 12px 18px;
+  justify-content: flex-end; border-top: 1px solid #e2e8f0;
+}
+.rpt-cancel-btn { padding: 10px 20px; border: 1.5px solid #cbd5e1; border-radius: 9px; background: white; cursor: pointer; font-weight: 600; }
+.rpt-print-btn  { padding: 10px 24px; background: var(--blue); color: white; border: none; border-radius: 9px; cursor: pointer; font-weight: 800; }
+.rpt-print-btn:disabled { opacity: .5; cursor: default; }

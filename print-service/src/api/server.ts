@@ -1,6 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import { printRouter } from './routes/print.js';
+import { printReportsRouter } from './routes/printReports.js';
 import { hardwareRouter } from './routes/hardware.js';
 import { systemStatusRouter } from './routes/systemStatus.js';
 import logger from '../utils/logger.js';
@@ -34,6 +35,7 @@ export function createServer(
 
   // Routes
   app.use('/print', printRouter);
+  app.use('/print', printReportsRouter);
   app.use('/hardware', hardwareRouter);
   app.use('/system', systemStatusRouter);
   app.get('/health', (req: Request, res: Response) => {

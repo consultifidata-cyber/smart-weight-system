@@ -11,6 +11,18 @@ const PORT = process.env.WEB_UI_PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Feature flags — read from .env, served to frontend on demand
+app.get('/api/flags', (_req, res) => {
+  res.json({
+    enableReports:           process.env.ENABLE_REPORTS            === 'true',
+    dispatchUseDjangoLookup: process.env.DISPATCH_USE_DJANGO_LOOKUP === 'true',
+    // Expose Django base URL + token so the browser can call report endpoints.
+    // Token is already known to operators; this is a factory-floor app, not public web.
+    djangoServerUrl:         process.env.DJANGO_SERVER_URL  || '',
+    djangoToken:             process.env.DJANGO_API_TOKEN   || '',
+  });
+});
+
 // Serve dispatch SPA for any /dispatch/* path not matched by static files
 app.get('/dispatch', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dispatch', 'index.html'));

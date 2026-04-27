@@ -787,7 +787,12 @@ begin
     '# -- Multi-station dispatch (v2.2.1)' + #13#10 +
     '# Set to true once /api/bags/<qr>/ is deployed on Django.' + #13#10 +
     '# When false (default): dispatch sees only bags from this station.' + #13#10 +
-    'DISPATCH_USE_DJANGO_LOOKUP=false' + #13#10;
+    'DISPATCH_USE_DJANGO_LOOKUP=false' + #13#10 +
+    '#' + #13#10 +
+    '# -- Worker reports (v2.3.0)' + #13#10 +
+    '# Set to true after deploying Django /api/reports/ endpoints.' + #13#10 +
+    '# Default false = reports feature invisible to operators.' + #13#10 +
+    'ENABLE_REPORTS=false' + #13#10;
 
   // SaveStringToFile writes ANSI (Windows code page). For our ASCII-only
   // .env content, ANSI = UTF-8 (no BOM, no null bytes). This is intentional
