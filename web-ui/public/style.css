@@ -2,6 +2,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  /* Colour palette — unchanged */
   --green:    #15803d;
   --yellow:   #d97706;
   --red:      #dc2626;
@@ -11,6 +12,16 @@
   --card:     #ffffff;
   --text:     #0f172a;
   --muted:    #475569;
+
+  /* Surface & spacing tokens */
+  --bg-page:        #f1f5f9;
+  --bg-card:        #ffffff;
+  --bg-card-subtle: #f8fafc;
+  --border-hairline: rgba(15, 23, 42, 0.08);
+  --shadow-card:    0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.06);
+  --gap-section:    6px;   /* 6px keeps padding safe across all 6 viewports */
+  --pad-section:    10px;  /* 10px (down from 12px) prevents overflow on small tablets */
+  --radius-card:    12px;
 }
 
 html, body {
@@ -26,16 +37,19 @@ html, body {
 [x-cloak] { display: none !important; }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   APP SHELL — full viewport, flex column, no scroll
+   APP SHELL — CSS Grid, zero-scroll, 100dvh
+   Rows: [banner?] [status-bar] [main-area fills rest]
 ══════════════════════════════════════════════════════════════════════════════ */
 .app {
-  display: flex;
-  flex-direction: column;
-  height: 100dvh;         /* dynamic viewport height — handles mobile browser chrome */
-  width: 100%;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100dvh;
+  width: 100vw;
   overflow: hidden;
-  padding: 6px;
-  gap: 5px;
+  background: var(--bg-page);
+  padding: var(--gap-section);
+  gap: var(--gap-section);
+  box-sizing: border-box;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -44,13 +58,15 @@ html, body {
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: var(--card);
-  border-radius: 10px;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
   flex-shrink: 0;
-  min-height: 44px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.1);
+  min-height: 0;
+  max-height: 6vh;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
 }
 
 .sbar-station {
@@ -147,119 +163,211 @@ html, body {
 }
 .report-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ── Today bar ── */
-.today-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  background: #dbeafe;
-  border: 1px solid #93c5fd;
-  border-radius: 10px;
+/* ── Bags today in merged status bar ── */
+.sbar-bags {
+  display: flex; align-items: baseline; gap: 3px;
+  background: #dbeafe; border-radius: 7px; padding: 2px 8px;
   flex-shrink: 0;
 }
-
-.today-total { display: flex; align-items: baseline; gap: 6px; }
 .bags-number {
-  font-size: 1.8rem; font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  color: var(--blue); line-height: 1;
+  font-size: clamp(1rem, 3vh, 1.6rem); font-weight: 800;
+  font-variant-numeric: tabular-nums; color: var(--blue); line-height: 1;
 }
-.bags-label { font-size: .9rem; color: var(--muted); font-weight: 600; text-transform: uppercase; }
+.bags-label { font-size: .68rem; color: var(--muted); font-weight: 600; text-transform: uppercase; }
 
-.refresh-group { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-.refresh-btn {
-  padding: 7px 14px; font-size: .9rem; font-weight: 700;
+/* Compact refresh button in status bar */
+.refresh-btn.compact {
+  padding: 3px 8px; font-size: .9rem; font-weight: 700;
+  border: 2px solid var(--blue); border-radius: 7px;
+  background: white; color: var(--blue); cursor: pointer; min-width: 28px;
+}
+.refresh-btn.compact:disabled { opacity: .6; cursor: not-allowed; }
+.refresh-btn.compact.spinning span { display: inline-block; animation: spin 1s linear infinite; }
+
+/* Keep old refresh-btn for backward compat */
+.refresh-btn:not(.compact) {
+  padding: 5px 10px; font-size: .82rem; font-weight: 700;
   border: 2px solid var(--blue); border-radius: 8px;
   background: white; color: var(--blue); cursor: pointer;
 }
-.refresh-btn:disabled { opacity: .6; cursor: not-allowed; }
-.refresh-btn.spinning span { display: inline-block; animation: spin 1s linear infinite; }
-
-.sync-stamp { font-size: .72rem; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 3px; }
-.sync-stamp.sync-stale { color: var(--yellow); }
-.sync-stamp.sync-never  { color: var(--red); }
+.refresh-btn:not(.compact):disabled { opacity: .6; cursor: not-allowed; }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   MAIN AREA — RESPONSIVE LAYOUT
-   Portrait  → column  (weight card → product → workers → print, recent on top)
-   Landscape → row     (recent panel left, main column right)
+   MAIN AREA — CSS Grid, zero-scroll adaptive layout
+   ─────────────────────────────────────────────────────────────────────────────
+   GRID STRATEGY:
+
+   Landscape (@media orientation:landscape):
+     .main-area uses named grid areas:
+       "recent weight"   ← 2fr
+       "recent workers"  ← 3fr
+       "recent print"    ← clamp(60px,10vh,110px)
+     .item-block has display:contents → transparent, its children
+     (.recent-panel and .zone-weight) become DIRECT grid items in .main-area.
+     This lets recent items span full height while weight+product share row 1.
+
+   Portrait (@media orientation:portrait):
+     .main-area is a single-column grid: auto / 1fr / clamp.
+     .item-block is a normal grid container (display:grid) showing
+     recent items in a 4-wide horizontal grid, then weight+product below.
+
+   WHY min-height: 0 ON ALL CHILDREN:
+     CSS flex/grid children have implicit min-height: auto, which means they
+     will grow to fit their content — breaking the "fit in viewport" contract.
+     Setting min-height: 0 allows the browser to shrink children below their
+     natural size, which is required for the 1fr / fr-unit rows to work.
+
+   ALL clamp() values use vh units so sizing scales proportionally to the
+   viewport height on any device without media-query breakpoints.
 ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Base: all zones must not overflow */
+.main-area, .item-block, .zone-weight, .zone-workers, .zone-print, .recent-panel {
+  min-height: 0; min-width: 0; overflow: hidden;
+}
+
 .main-area {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  gap: 6px;
-  overflow: hidden;
+  display: grid;
+  gap: var(--gap-section);
 }
 
-/* ── Portrait: stack vertically ── */
-@media (orientation: portrait) {
-  .main-area     { flex-direction: column; }
-  .recent-panel  {
-    flex-direction: row;
-    flex-shrink: 0;
-    width: 100%;
-    height: auto;
-    max-height: 72px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    gap: 5px;
-    padding: 5px 6px;
-    scrollbar-width: none;
-  }
-  .recent-panel::-webkit-scrollbar { display: none; }
-  .recent-panel-title { display: none; } /* no room in portrait strip */
-  .recent-btn {
-    flex-direction: column;
-    min-width: 90px;
-    max-width: 120px;
-    flex-shrink: 0;
-    height: 58px;
-    font-size: .8rem;
-    padding: 5px 7px;
-  }
-  .main-col { flex: 1; overflow-y: auto; overflow-x: hidden; }
-}
-
-/* ── Landscape: side by side ── */
+/* ── Landscape layout ── */
 @media (orientation: landscape) {
-  .main-area     { flex-direction: row; }
-  .recent-panel  {
-    flex-direction: column;
-    width: 140px;
-    flex-shrink: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    scrollbar-width: thin;
+  .main-area {
+    grid-template-columns: 22% 1fr;
+    grid-template-rows: 2fr 3fr clamp(60px, 10vh, 110px);
+    grid-template-areas:
+      "recent weight"
+      "recent workers"
+      "recent print";
   }
-  .main-col { flex: 1; overflow-y: auto; overflow-x: hidden; }
+
+  /* item-block becomes transparent — its children are direct grid items */
+  .item-block   { display: contents; }
+  .recent-panel { grid-area: recent; }
+  .zone-weight  { grid-area: weight; }
+  .zone-workers { grid-area: workers; }
+  .zone-print   { grid-area: print; }
+
+  /* Recent panel: vertical stack, 8 equal-height items */
+  .recent-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: var(--pad-section);
+    background: var(--bg-card);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  .recent-btn { flex: 1; min-height: 0; font-size: clamp(.72rem, 1.4vh, 1rem); }
+
+  /* Weight + product zone */
+  .zone-weight {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: var(--pad-section);
+    background: var(--bg-card);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    min-height: 0;
+  }
+
+  /* Workers zone */
+  .zone-workers {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--pad-section);
+    background: var(--bg-card);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Print zone: card surface + subtle gradient tint */
+  .zone-print {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: var(--pad-section);
+    background: linear-gradient(to bottom, var(--bg-card), var(--bg-card-subtle));
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+}
+
+/* ── Portrait layout ── */
+@media (orientation: portrait) {
+  .main-area {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr clamp(120px, 22vh, 200px);
+  }
+
+  /* item-block: 4×2 recent grid on top, then weight+product below */
+  .item-block {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: var(--gap-section);
+    overflow: hidden;
+  }
+
+  .recent-panel {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    padding: var(--pad-section);
+    background: var(--bg-card);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  .recent-btn { font-size: clamp(.68rem, 1.8vw, .9rem); padding: 5px 4px; }
+
+  .zone-weight {
+    display: flex;
+    flex-direction: row;
+    gap: 5px;
+    padding: var(--pad-section);
+    background: var(--bg-card);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    align-items: stretch;
+    overflow: hidden;
+  }
+  .zone-weight .weight-card    { flex: 1; min-height: 0; }
+  .zone-weight .select-wrapper { flex: 1; min-height: 0; }
+
+  .zone-workers {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--pad-section);
+    background: var(--bg-card);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .zone-print {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: var(--pad-section);
+    background: linear-gradient(to bottom, var(--bg-card), var(--bg-card-subtle));
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   RECENT PANEL
+   RECENT PANEL + BUTTONS
 ══════════════════════════════════════════════════════════════════════════════ */
-.recent-panel {
-  display: flex;
-  background: var(--card);
-  border-radius: 12px;
-  padding: 8px 6px;
-  gap: 5px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.08);
-}
-
-.recent-panel-title {
-  font-size: .75rem; font-weight: 800;
-  text-transform: uppercase; letter-spacing: .08em;
-  color: var(--muted); margin-bottom: 2px; padding: 0 3px;
-  white-space: nowrap;
-}
-
 .recent-btn {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 7px;
+  justify-content: center;
+  gap: 1px;
+  padding: 5px 6px;
   border: 2px solid #e2e8f0;
   border-radius: 8px;
   background: var(--bg);
@@ -267,63 +375,59 @@ html, body {
   cursor: pointer;
   text-align: left;
   transition: border-color .15s, background .15s;
-  min-height: 52px;
+  min-height: 0;
+  overflow: hidden;
 }
-.recent-btn.active {
-  border-color: var(--blue); background: #eff6ff;
-}
-.recent-btn.recent-first {
-  border-color: var(--green); background: #f0fdf4;
-}
+.recent-btn.active   { border-color: var(--blue); background: #eff6ff; }
 .recent-btn:active:not(:disabled) { transform: scale(.97); }
 .recent-btn:disabled { opacity: .5; cursor: not-allowed; }
 
+/* Price-based color coding */
+.recent-btn.price-5  { background: #d1fae5; border-color: #10b981; color: #065f46; }
+.recent-btn.price-10 { background: #fee2e2; border-color: #ef4444; color: #991b1b; }
+.recent-btn.price-5.active  { background: #6ee7b7; border-color: #059669; }
+.recent-btn.price-10.active { background: #fca5a5; border-color: #dc2626; }
+
 .recent-name {
-  font-size: .88rem; font-weight: 700; line-height: 1.25;
+  font-size: clamp(.72rem, 1.5vh, 1rem);
+  font-weight: 700; line-height: 1.2;
   word-break: break-word; white-space: normal; display: block;
 }
-.recent-meta { font-size: .72rem; color: var(--muted); display: block; font-variant-numeric: tabular-nums; }
 .recent-empty { font-size: .8rem; color: var(--muted); text-align: center; padding: 8px 4px; }
-
-/* ══════════════════════════════════════════════════════════════════════════════
-   MAIN COLUMN CONTENTS
-══════════════════════════════════════════════════════════════════════════════ */
-.main-col {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 4px;
-}
 
 /* ── Weight card ── */
 .weight-card {
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  padding: 16px 12px;
-  border-radius: 14px;
+  padding: clamp(6px, 1.5vh, 14px) 10px;
+  border-radius: 12px;
   background: var(--card);
   box-shadow: 0 2px 8px rgba(0,0,0,.08);
   transition: background .3s;
 }
-.weight-card.weight-stable  { background: #dcfce7; box-shadow: 0 2px 12px rgba(22,163,74,.2); }
+.weight-card.weight-stable   { background: #dcfce7; box-shadow: 0 2px 12px rgba(22,163,74,.2); }
 .weight-card.weight-settling { background: #fef3c7; }
-.weight-card.weight-error   { background: #fee2e2; }
+.weight-card.weight-error    { background: #fee2e2; }
 
 .weight-reading { display: flex; align-items: baseline; }
 .weight-value {
-  font-size: clamp(2.5rem, 10vw, 5.5rem);
+  font-size: clamp(2rem, 8vw, 5rem);
   font-weight: 700; font-variant-numeric: tabular-nums;
   letter-spacing: -.02em; line-height: 1;
 }
-.weight-unit { font-size: 1.3rem; font-weight: 400; color: var(--muted); margin-left: 6px; }
-.weight-status { font-size: 1rem; margin-top: 6px; font-weight: 600; }
+.weight-unit   { font-size: clamp(.9rem, 2vw, 1.3rem); font-weight: 400; color: var(--muted); margin-left: 5px; }
+.weight-status { font-size: clamp(.8rem, 1.6vh, 1rem); margin-top: 3px; font-weight: 600; }
 
 /* ── Product select ── */
-.select-wrapper { position: relative; flex-shrink: 0; }
+.select-wrapper { position: relative; flex-shrink: 0; min-height: 0; }
 .product-select {
-  width: 100%; min-height: 56px;
-  padding: 10px 18px; font-size: 1.1rem; font-weight: 500;
+  width: 100%;
+  height: 100%;
+  min-height: clamp(38px, 5vh, 56px);
+  padding: clamp(5px,1vh,10px) clamp(10px,2vw,18px);
+  font-size: clamp(.85rem, 2vh, 1.1rem); font-weight: 500;
   border: 2px solid #cbd5e1; border-radius: 10px;
   background: var(--card); color: var(--text);
   appearance: none; -webkit-appearance: none; cursor: pointer;
@@ -331,122 +435,127 @@ html, body {
 .product-select:focus { outline: none; border-color: var(--blue); }
 .product-select:disabled { opacity: .6; cursor: not-allowed; }
 .select-arrow {
-  position: absolute; right: 14px; top: 50%;
-  transform: translateY(-50%); font-size: 1.1rem; color: var(--muted); pointer-events: none;
+  position: absolute; right: 12px; top: 50%;
+  transform: translateY(-50%); font-size: 1rem; color: var(--muted); pointer-events: none;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   WORKER GRID
+   WORKER GRID — 15 fixed slots (5×3 landscape, 3×5 portrait) + More button
 ══════════════════════════════════════════════════════════════════════════════ */
-.worker-section {
-  display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
-}
-
 .worker-section-label {
-  font-size: .85rem; font-weight: 700;
-  color: var(--muted); display: flex; align-items: center; gap: 8px;
+  font-size: clamp(.72rem, 1.4vh, .9rem); font-weight: 700;
+  color: var(--muted); display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0;
 }
 .worker-selected-badge {
-  padding: 2px 8px; background: var(--blue); color: white;
-  border-radius: 12px; font-size: .82rem; font-weight: 800;
+  padding: 2px 7px; background: var(--blue); color: white;
+  border-radius: 10px; font-size: clamp(.72rem, 1.3vh, .85rem); font-weight: 800;
 }
-.worker-required-hint { font-size: .78rem; color: var(--red); font-weight: 600; }
+.worker-required-hint { font-size: .72rem; color: var(--red); font-weight: 600; }
 
-/* Pinned workers — BIG buttons in a responsive grid */
-.worker-grid-pinned {
+/* 15-slot grid + 1 More cell = 16 cells */
+.worker-pin-grid {
   display: grid;
-  /* Default: 5 columns for 15 workers */
-  grid-template-columns: repeat(5, 1fr);
-  gap: 5px;
+  flex: 1;
+  min-height: 0;
+  gap: clamp(3px, .6vh, 6px);
 }
 
-/* If fewer than 10 pinned: 3 columns */
-.worker-grid-pinned.grid-few {
-  grid-template-columns: repeat(3, 1fr);
+@media (orientation: landscape) {
+  .worker-pin-grid { grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(3, 1fr); }
 }
-
-/* Portrait: 3 columns always */
 @media (orientation: portrait) {
-  .worker-grid-pinned { grid-template-columns: repeat(3, 1fr); }
+  .worker-pin-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Each cell — empty cells are invisible placeholders keeping grid stable */
+.wpin-cell {
+  min-height: 0; min-width: 0;
+  display: flex; align-items: stretch;
+}
+.wpin-inner {
+  position: relative; flex: 1; display: flex; align-items: stretch;
 }
 
 .worker-pin-btn {
+  flex: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 8px 4px;
-  min-height: 64px;
-  border: 3px solid #e2e8f0;
-  border-radius: 10px;
+  padding: clamp(4px, .8vh, 8px) 3px;
+  border: 2px solid #e2e8f0;
+  border-radius: 9px;
   background: var(--bg);
   cursor: pointer;
-  transition: border-color .15s, background .15s, transform .1s;
+  transition: border-color .12s, background .12s, transform .08s;
   gap: 2px;
+  min-height: clamp(48px, 8vh, 80px);
+  min-width: 0;
 }
-.worker-pin-btn:active:not(:disabled) { transform: scale(.95); }
+.worker-pin-btn:active:not(:disabled) { transform: scale(.93); }
 .worker-pin-btn:disabled { opacity: .5; cursor: not-allowed; }
 .worker-pin-btn.selected {
-  border-color: var(--blue);
-  background: #dbeafe;
+  border-color: var(--blue); background: #dbeafe;
   box-shadow: 0 0 0 2px var(--blue);
 }
 
 .wpin-code {
-  font-size: 1.1rem; font-weight: 900; color: var(--text);
+  font-size: clamp(.9rem, 2vh, 1.3rem);
+  font-weight: 900; color: var(--text);
   font-variant-numeric: tabular-nums; line-height: 1;
 }
 .wpin-name {
-  font-size: .7rem; color: var(--muted); font-weight: 600;
+  font-size: clamp(.6rem, 1.2vh, .75rem);
+  color: var(--muted); font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  max-width: 100%;
+  max-width: 90%;
 }
 .worker-pin-btn.selected .wpin-code { color: var(--blue); }
 
-/* Other workers — small chips */
-.worker-grid-others { display: flex; flex-direction: column; gap: 4px; }
-.worker-others-label { font-size: .75rem; color: var(--muted); font-weight: 600; }
-.worker-grid-small {
-  display: flex; flex-wrap: wrap; gap: 5px;
+/* More button — same visual size as slot buttons */
+.worker-more-btn {
+  min-height: clamp(48px, 8vh, 80px);
+  border: 2px dashed #94a3b8;
+  border-radius: 9px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: clamp(.72rem, 1.4vh, .9rem);
+  font-weight: 700;
+  cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1px; padding: 4px;
+  line-height: 1.3;
 }
-.worker-small-btn {
-  padding: 5px 10px;
-  font-size: .82rem; font-weight: 700;
-  border: 2px solid #e2e8f0; border-radius: 7px;
-  background: var(--bg); cursor: pointer;
-  color: var(--text);
-}
-.worker-small-btn.selected {
-  border-color: var(--blue); background: #eff6ff; color: var(--blue);
-}
-.worker-small-btn:active:not(:disabled) { transform: scale(.95); }
-.worker-small-btn:disabled { opacity: .5; cursor: not-allowed; }
+.worker-more-btn:hover { background: #eff6ff; border-color: var(--blue); color: var(--blue); }
 
-/* Worker 2 compact row */
-.worker2-row {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+/* ── Compact last-printed strip (~5vh) ── */
+.last-bag-strip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px;
+  flex-shrink: 0; overflow: hidden; min-height: 0;
+  max-height: 5vh;
 }
-.worker2-label { font-size: .78rem; color: var(--muted); font-weight: 600; white-space: nowrap; }
-.worker2-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.worker2-chip {
-  padding: 4px 9px; font-size: .78rem; font-weight: 700;
-  border: 2px solid #cbd5e1; border-radius: 14px;
-  background: var(--bg); cursor: pointer; color: var(--text);
+.last-bag-name {
+  font-size: clamp(.72rem, 1.4vh, .9rem);
+  font-weight: 700; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.worker2-chip.selected { border-color: var(--green); background: #f0fdf4; color: var(--green); }
-.worker2-chip:disabled { opacity: .5; cursor: not-allowed; }
+.last-bag-meta-compact {
+  font-size: clamp(.65rem, 1.2vh, .8rem);
+  color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; flex-shrink: 0;
+}
+.reprint-btn-compact {
+  flex-shrink: 0; padding: 3px 9px;
+  font-size: clamp(.8rem, 1.5vh, 1rem); font-weight: 800;
+  border: 2px solid var(--blue); border-radius: 7px;
+  background: white; color: var(--blue); cursor: pointer;
+}
+.reprint-btn-compact:active:not(:disabled) { background: #eff6ff; }
+.reprint-btn-compact:disabled { opacity: .4; cursor: not-allowed; }
 
-/* ── Last bag ── */
-.last-bag-row { display: flex; align-items: stretch; gap: 6px; flex-shrink: 0; }
-.last-bag-row .last-bag-card { flex: 1; min-width: 0; }
-.last-bag-card {
-  padding: 8px 12px; background: #f0fdf4;
-  border: 2px solid #86efac; border-radius: 10px;
-}
-.last-bag-header { font-size: .72rem; font-weight: 800; color: #15803d; text-transform: uppercase; margin-bottom: 2px; }
-.last-bag-detail { font-size: .95rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.last-bag-meta   { font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 1px; }
-
+/* Keep old reprint-btn for any remaining references */
 .reprint-btn {
-  flex-shrink: 0; min-width: 80px; min-height: 64px;
-  padding: 8px 12px; font-size: .95rem; font-weight: 700;
+  flex-shrink: 0; min-width: 70px;
+  padding: 6px 10px; font-size: .9rem; font-weight: 700;
   border: 2px solid var(--blue); border-radius: 10px;
   background: white; color: var(--blue); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
@@ -454,21 +563,23 @@ html, body {
 .reprint-btn:active:not(:disabled) { background: #eff6ff; transform: scale(.97); }
 .reprint-btn:disabled { opacity: .4; cursor: not-allowed; }
 
-/* ── Print button ── */
-.spacer { flex: 1; min-height: 4px; }
-
+/* ── PRINT button — always fills zone-print remainder ── */
 .print-btn {
-  width: 100%; min-height: 80px;
-  padding: 14px 20px; font-size: 1.6rem; font-weight: 800;
-  letter-spacing: .05em; border: none; border-radius: 14px;
-  cursor: pointer; color: white; flex-shrink: 0;
+  flex: 1;
+  width: 100%;
+  min-height: clamp(54px, 8vh, 110px);
+  padding: clamp(8px, 1.5vh, 16px) 16px;
+  font-size: clamp(1.1rem, 4vh, 2rem);
+  font-weight: 800; letter-spacing: .05em;
+  border: none; border-radius: 12px;
+  cursor: pointer; color: white;
   background: var(--blue);
-  box-shadow: 0 5px 14px rgba(29,78,216,.35);
-  transition: background .2s, transform .1s;
+  box-shadow: 0 4px 12px rgba(29,78,216,.3);
+  transition: background .2s, transform .08s;
   line-height: 1.2;
 }
 .print-btn:active:not(:disabled) { transform: scale(.97); }
-.print-btn:disabled { background: var(--disabled); box-shadow: none; cursor: not-allowed; font-size: 1.1rem; }
+.print-btn:disabled { background: var(--disabled); box-shadow: none; cursor: not-allowed; font-size: clamp(.85rem, 2.5vh, 1.2rem); }
 .print-btn.printing { background: #b45309; animation: pulse-print 1s ease-in-out infinite; }
 .print-btn.success  { background: var(--green); animation: pulse-success .5s ease-out; }
 .print-btn.retrying { background: #92400e; animation: pulse-retry 1.2s ease-in-out infinite; }
@@ -478,8 +589,13 @@ html, body {
    WORKERS PANEL (full screen overlay)
 ══════════════════════════════════════════════════════════════════════════════ */
 .workers-panel {
-  position: fixed; inset: 0; z-index: 9000;
-  background: var(--bg); display: flex; flex-direction: column;
+  /* Used inside .workers-modal-overlay — see modal CSS below */
+  display: flex; flex-direction: column;
+  background: var(--card);
+  border-radius: 14px;
+  overflow: hidden;
+  max-height: 80vh;
+  width: min(600px, 90vw);
 }
 .workers-panel-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -813,3 +929,320 @@ html, body { overflow: hidden; height: 100vh; width: 100vw; }
 .rpt-cancel-btn { padding: 10px 20px; border: 1.5px solid #cbd5e1; border-radius: 9px; background: white; cursor: pointer; font-weight: 600; }
 .rpt-print-btn  { padding: 10px 24px; background: var(--blue); color: white; border: none; border-radius: 9px; cursor: pointer; font-weight: 800; }
 .rpt-print-btn:disabled { opacity: .5; cursor: default; }
+
+/* ── Workers panel footer (Print Summary button) ────────────────────────────── */
+.workers-panel-footer {
+  padding: 10px 12px; border-top: 1px solid #e2e8f0; flex-shrink: 0;
+}
+.workers-print-summary-btn {
+  width: 100%; padding: 10px; font-size: .9rem; font-weight: 800;
+  background: var(--blue); color: white; border: none; border-radius: 9px;
+  cursor: pointer;
+}
+.workers-print-summary-btn:hover { opacity: .9; }
+
+/* Per-worker report icon in the worker list rows */
+.worker-list-report-btn {
+  margin-left: auto; background: transparent; border: 1px solid rgba(0,0,0,.12);
+  border-radius: 5px; padding: 2px 6px; font-size: .8rem; cursor: pointer;
+  color: var(--muted); flex-shrink: 0;
+}
+.worker-list-report-btn:hover { background: #f1f5f9; }
+
+/* ── Zone-level flex setup ───────────────────────────────────────────────────── */
+.zone-weight {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  overflow: hidden;
+}
+.zone-weight .weight-card { flex: 1; min-height: 0; }
+.zone-weight .select-wrapper { flex-shrink: 0; }
+
+.zone-workers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow: hidden;
+}
+.worker-pin-grid { flex: 1; min-height: 0; }
+
+.zone-print {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 0;
+}
+.zone-print .print-btn { flex: 1; }
+
+/* ── Sync health banner compact ──────────────────────────────────────────────── */
+.sync-health-banner {
+  flex-shrink: 0;
+  background: #7c2d12; color: #fed7aa;
+  font-size: clamp(.7rem, 1.5vh, .85rem); font-weight: 700;
+  text-align: center; padding: 3px 8px; border-radius: 6px;
+  max-height: 4vh; overflow: hidden;
+}
+
+/* ── Training hints (hidden in production, small when shown) ─────────────────── */
+.training-hint { display: none; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   VERIFICATION FIXES + POLISH — Part B/C/D
+══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── B1: Empty recent items — stretch existing items to fill column (option 2)
+   flex: 1 on .recent-btn already handles proportional stretch.
+   Comment: chosen over placeholder slots to avoid visual "ghost" buttons.  ── */
+
+/* ── B3: Long product names — 2-line clamp then ellipsis ── */
+.recent-name {
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal !important;
+}
+
+/* ── B4: Long worker names — ellipsis already set, reinforce ── */
+.wpin-name {
+  max-width: 95%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── B7: Last-printed strip — force single line, never pushes print btn ── */
+.last-bag-strip {
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.last-bag-name, .last-bag-meta-compact {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── C1: Clear selection rings ── */
+.recent-btn.active {
+  border-color: var(--blue) !important;
+  box-shadow: 0 0 0 3px rgba(29,78,216,.35) !important;
+  background: #eff6ff;
+}
+.worker-pin-btn.selected {
+  border-color: var(--blue) !important;
+  background: #dbeafe !important;
+  box-shadow: 0 0 0 3px rgba(29,78,216,.4) !important;
+}
+
+/* ── C2: MRU indicator — small accent dot on last-used worker slot ── */
+.wpin-mru-dot {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 8px; height: 8px;
+  background: var(--yellow);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.wpin-inner { position: relative; }
+
+/* ── C3: Promotion animation — new worker fades/scales in ≤300ms ── */
+@keyframes wpin-promote {
+  0%   { opacity: 0; transform: scale(0.75); }
+  60%  { opacity: 1; transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.wpin-promoted .worker-pin-btn {
+  animation: wpin-promote 320ms ease-out;
+  border-color: var(--green) !important;
+}
+
+/* ── C5: Bags count — large enough to read from arm's length ── */
+.sbar-bags .bags-number {
+  font-size: clamp(1.1rem, 3.5vh, 1.8rem) !important;
+  font-weight: 900 !important;
+}
+
+/* ── C6: PRINT button tactile feedback ── */
+.print-btn:active:not(:disabled) {
+  transform: scale(0.98) !important;
+  transition: transform 100ms ease-out !important;
+}
+
+/* ── Viewport overflow guard — final safety net ── */
+* { max-width: 100vw; }
+.main-area * { box-sizing: border-box; }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   v2.4.0 — Resilience, Worker Experience, Polish
+══════════════════════════════════════════════════════════════════════════════ */
+
+/* 4.1 — Larger weight digits in portrait */
+@media (orientation: portrait) {
+  .weight-value { font-size: clamp(4rem, 14vh, 9rem) !important; }
+  .weight-unit  { font-size: clamp(1.2rem, 3.5vh, 2.2rem) !important; }
+  .weight-status { font-size: clamp(.9rem, 2.2vh, 1.3rem) !important; }
+}
+
+/* 4.2 — prefers-reduced-motion: disable all transforms/animations */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .print-btn:active:not(:disabled) { transform: none !important; }
+  .wpin-promoted .worker-pin-btn    { animation: none !important; }
+}
+
+/* 4.3 — Sync latency dot (1s ticker) */
+.sync-latency-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  display: inline-block; margin-left: 4px; flex-shrink: 0;
+  vertical-align: middle;
+}
+.latency-green { background: #22c55e; }
+.latency-amber { background: var(--yellow); animation: pulse-red 2s infinite; }
+.latency-red   { background: var(--red);    animation: pulse-red 1s infinite; }
+
+/* 2.2 — Worker shift bag count badge */
+.wpin-shift-count {
+  font-size: clamp(.55rem, 1vh, .72rem);
+  color: var(--blue); font-weight: 700;
+  line-height: 1; margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 5.2 — Startup self-test overlay */
+.selftest-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  z-index: 10500; display: flex; align-items: center; justify-content: center;
+}
+.selftest-box {
+  background: var(--card); border-radius: 14px; padding: 24px 22px;
+  width: min(340px, 90vw); box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.selftest-title { font-size: 1.1rem; font-weight: 800; color: var(--blue); margin-bottom: 16px; text-align: center; }
+.selftest-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid #f1f5f9; font-size: .95rem; font-weight: 600;
+}
+.selftest-icon { font-size: 1.1rem; width: 20px; text-align: center; }
+.st-checking .selftest-icon { color: var(--muted); }
+.st-pass     .selftest-icon { color: var(--green); }
+.st-fail     .selftest-icon { color: var(--red); }
+.selftest-err { font-size: .75rem; color: var(--red); margin-left: auto; }
+.selftest-continue {
+  margin-top: 16px; width: 100%; padding: 12px;
+  font-size: 1rem; font-weight: 800; border: none; border-radius: 10px;
+  background: var(--blue); color: white; cursor: pointer;
+}
+
+/* 1.2 — Duplicate-print guard modal */
+.dupguard-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  z-index: 10400; display: flex; align-items: center; justify-content: center;
+}
+.dupguard-box {
+  background: #fef3c7; border: 3px solid var(--yellow); border-radius: 14px;
+  padding: 22px 20px; width: min(380px, 90vw); text-align: center;
+}
+.dupguard-title { font-size: 1.15rem; font-weight: 800; color: #92400e; margin-bottom: 8px; }
+.dupguard-body  { font-size: .9rem; color: #78350f; margin-bottom: 18px; line-height: 1.5; }
+.dupguard-actions { display: flex; gap: 10px; }
+.dupguard-cancel  { flex: 1; padding: 12px; border: 2px solid #d97706; border-radius: 9px; background: white; cursor: pointer; font-weight: 700; }
+.dupguard-confirm { flex: 1; padding: 12px; background: #d97706; color: white; border: none; border-radius: 9px; cursor: pointer; font-weight: 800; }
+
+/* 2.1 — Sound toggle button in workers panel footer */
+.workers-panel-footer {
+  display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid #e2e8f0; flex-shrink: 0;
+}
+.sound-toggle-btn {
+  flex: 1; padding: 9px 10px; font-size: .82rem; font-weight: 700;
+  border: 2px solid #e2e8f0; border-radius: 9px; background: #f8fafc; cursor: pointer;
+  color: var(--muted); min-height: 44px;
+}
+.sound-toggle-btn.active { border-color: var(--green); background: #f0fdf4; color: var(--green); }
+.workers-print-summary-btn { flex: 1; min-height: 44px; }
+
+/* 5.3 — Version footer */
+.version-footer {
+  font-size: .68rem; color: #94a3b8; text-align: center;
+  padding: 4px 0; flex-shrink: 0;
+}
+
+/* 5.4 — Touch targets: all interactive ≥ 44×44 */
+.refresh-btn.compact,
+.sbar-reports-btn,
+.training-toggle,
+.workers-btn,
+.worker-more-btn,
+.wpin-report-icon,
+.worker-list-report-btn,
+.rpt-close,
+.wsm-close,
+.pin-cancel-btn,
+.dupguard-cancel,
+.selftest-continue {
+  min-height: 44px; min-width: 44px;
+}
+.reprint-btn-compact { min-height: 44px; min-width: 44px; }
+.workers-panel-close  { min-height: 44px; min-width: 60px; }
+
+/* ── 1.1 Pending sync amber badge ────────────────────────────────────────────── */
+.sync-pending-badge {
+  background: #fef3c7; border: 2px solid #d97706; border-radius: 14px;
+  color: #92400e; font-size: .72rem; font-weight: 800;
+  padding: 2px 10px; cursor: pointer; white-space: nowrap;
+  flex-shrink: 0; min-height: 28px; align-self: center;
+  animation: pulse-retry 2s ease-in-out infinite;
+}
+.sync-pending-badge:hover { background: #fde68a; }
+
+/* ── 3.1 Hardware status modal ──────────────────────────────────────────────── */
+.hw-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  z-index: 9600; display: flex; align-items: center; justify-content: center; padding: 12px;
+}
+.hw-box {
+  background: var(--card); border-radius: 14px;
+  width: min(420px, 96vw); max-height: 85vh; overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,.4);
+  display: flex; flex-direction: column;
+}
+.hw-box-wide { width: min(620px, 96vw); }
+.hw-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0;
+  font-size: 1rem; font-weight: 800; color: var(--blue);
+}
+.hw-checked { font-size: .72rem; color: var(--muted); font-weight: 400; }
+.hw-close   { background: none; border: none; font-size: 1rem; cursor: pointer; color: var(--muted); min-width: 44px; min-height: 44px; }
+.hw-loading { padding: 24px; text-align: center; color: var(--muted); font-size: .9rem; }
+.hw-cards   { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; padding: 12px; }
+.hw-card    { background: #f8fafc; border-radius: 10px; padding: 10px 12px; }
+.hw-card-title { font-size: .78rem; font-weight: 800; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.hw-row     { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.hw-label   { font-size: .78rem; color: var(--muted); font-weight: 600; }
+.hw-val     { font-size: .8rem; font-weight: 700; max-width: 55%; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hw-pill    { padding: 2px 8px; border-radius: 10px; font-size: .72rem; font-weight: 800; color: white; }
+.pill-green, .pill-ok, .pill-connected { background: var(--green); }
+.pill-yellow, .pill-amber { background: var(--yellow); color: #1c1917; }
+.pill-red, .pill-error, .pill-disconnected, .pill-unknown { background: var(--red); }
+
+/* ── Hardware status button in workers panel footer ─────────────────────────── */
+.hw-status-btn {
+  flex: 1; padding: 9px 6px; font-size: .82rem; font-weight: 700;
+  border: 2px solid #e2e8f0; border-radius: 9px; background: #f8fafc; cursor: pointer;
+  color: var(--muted); min-height: 44px;
+}
+.hw-status-btn:hover { border-color: var(--blue); color: var(--blue); background: #eff6ff; }
+
+/* Workers panel footer: 3 buttons side by side */
+.workers-panel-footer { gap: 6px; }
+.sound-toggle-btn { flex: 1; }

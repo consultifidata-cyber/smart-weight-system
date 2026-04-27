@@ -23,6 +23,23 @@ app.get('/api/flags', (_req, res) => {
   });
 });
 
+// ── 5.1 Client error log endpoint ────────────────────────────────────────────
+// Accepts single {stationId,timestamp,level,source,message,stack,context}
+// or a batch {batch: [...]} for buffered errors flushed on reconnect.
+// Writes to logs/client-errors.log (fire-and-forget, never blocks response).
+app.post('/log', (req, res) => {
+  const fs = require('fs');
+  const logDir  = path.join(__dirname, '..', 'logs');
+  const logFile = path.join(logDir, 'client-errors.log');
+  try {
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    const entries = req.body.batch || [req.body];
+    const lines   = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+    fs.appendFile(logFile, lines, () => {});
+  } catch (e) { /* swallow — log failures must never block the UI */ }
+  res.json({ ok: true });
+});
+
 // Serve dispatch SPA for any /dispatch/* path not matched by static files
 app.get('/dispatch', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'dispatch', 'index.html'));

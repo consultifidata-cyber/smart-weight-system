@@ -221,14 +221,40 @@ export class TSPLDriver implements PrinterDriver {
    */
   async healthCheckWin(timeoutMs: number = 10_000): Promise<boolean> {
     try {
-      const { stdout } = await execAsync(
-        `powershell -Command "(Get-Printer -Name '${this.printerName}').PrinterStatus"`,
-        { timeout: timeoutMs },
+      const safeN = this.printerName.replace(/'/g, "''");
+
+      // Step 1 — Quick spooler check (~100ms).
+      // Catches explicit offline/error states the spooler already knows about.
+      const t1 = Math.min(3000, Math.floor(timeoutMs * 0.3));
+      const { stdout: spoolerOut } = await execAsync(
+        `powershell -NonInteractive -NoProfile -Command "(Get-Printer -Name '${safeN}').PrinterStatus"`,
+        { timeout: t1 },
       );
-      // 'Normal' = printing/just-printed. 'Idle' = ready and waiting.
-      // Both mean the printer is connected and usable.
-      const s = stdout.trim();
-      return s === 'Normal' || s === 'Idle' || s === 'Ready' || s === 'Printing';
+      const spoolerStatus = spoolerOut.trim();
+      if (['Offline', 'Error', 'Unknown', 'NotAvailable', ''].includes(spoolerStatus)) {
+        return false;
+      }
+
+      // Step 2 — Physical USB connectivity check (~200ms).
+      // The Windows print spooler keeps a printer as "Idle" for minutes after
+      // the USB cable is physically removed. But usbprint.sys removes the raw
+      // \\.\USBPRINxx device path IMMEDIATELY on cable pull. Testing file-open
+      // on those paths gives instant disconnect detection without relying on the
+      // spooler's delayed state update.
+      const t2 = Math.min(5000, Math.floor(timeoutMs * 0.6));
+      const physScript =
+        '$f=$false;' +
+        'for($i=1;$i-le9;$i++){' +
+          '$p="\\\\.\\USBPRIN0$i";' +
+          'try{$s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite);$s.Close();$f=$true;break}' +
+          'catch{}}; ' +
+        "if($f){'CONNECTED'}else{'DISCONNECTED'}";
+      const { stdout: physOut } = await execAsync(
+        `powershell -NonInteractive -NoProfile -Command "${physScript}"`,
+        { timeout: t2 },
+      );
+
+      return physOut.trim() === 'CONNECTED';
     } catch {
       return false;
     }

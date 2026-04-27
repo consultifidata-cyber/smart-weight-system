@@ -62,12 +62,26 @@ async function checkWindowsHealth(printerName: string): Promise<boolean> {
   if (process.platform !== 'win32') return false;
   try {
     const safeN = printerName.replace(/'/g, "''");
-    const { stdout } = await execAsync(
+    const { stdout: spoolerOut } = await execAsync(
       `powershell -NonInteractive -NoProfile -Command "(Get-Printer -Name '${safeN}').PrinterStatus"`,
       { timeout: 3000 },
     );
-    const s = stdout.trim();
-    return s === 'Normal' || s === 'Idle' || s === 'Ready' || s === 'Printing';
+    const s = spoolerOut.trim();
+    if (['Offline', 'Error', 'Unknown', 'NotAvailable', ''].includes(s)) return false;
+
+    // Physical USB connectivity check — see tspl.ts healthCheckWin for full comment
+    const physScript =
+      '$f=$false;' +
+      'for($i=1;$i-le9;$i++){' +
+        '$p="\\\\.\\USBPRIN0$i";' +
+        'try{$s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite);$s.Close();$f=$true;break}' +
+        'catch{}}; ' +
+      "if($f){'CONNECTED'}else{'DISCONNECTED'}";
+    const { stdout: physOut } = await execAsync(
+      `powershell -NonInteractive -NoProfile -Command "${physScript}"`,
+      { timeout: 4000 },
+    );
+    return physOut.trim() === 'CONNECTED';
   } catch {
     return false;
   }

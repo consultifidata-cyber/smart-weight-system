@@ -91,8 +91,40 @@ function weightApp() {
     _scaleCountdownId:      null,
     // H2/H3 — shift + clock
     _clockTick:             0,     // incremented every minute; makes shiftClockLabel reactive
-    // v2.3.0 — feature flags (loaded from /api/flags on init)
-    enableReports:          false,
+    // Promotion animation state
+    _promotedCode:          '',
+    _promotedTimerId:       null,
+
+    // 1.2 — Duplicate print guard
+    _lastPrintSignature:    null,   // { workerCode, packId, weightGm, ts }
+    _dupGuardModal:         false,  // pending duplicate confirmation
+    _dupGuardTimerId:       null,   // auto-dismiss after 5s
+
+    // 2.1 — Audio toggle (enableBeep already in CONFIG; persist user override)
+    soundEnabled:           CONFIG.enableBeep !== false,
+
+    // 2.2 — Per-worker shift bag counts
+    workerShiftCounts:      {},   // { workerCode: count } — current shift
+    _currentShiftForCounts: '',  // shift letter when counts were last saved
+
+    // 1.1 — Pending sync badge (from existing SQLite queue via /sync/status)
+    syncPendingCount:       0,
+    syncPendingModal:       false,
+
+    // 3.1 — Hardware status modal
+    hwModal:                { show: false, loading: false, data: null },
+    _hwRefreshTimerId:      null,
+
+    // 4.3 — Sync latency (seconds since last push)
+    _lastSyncPushAt:        null,
+    _syncLatencySec:        null,
+    _syncLatencyTimerId:    null,
+
+    // 5.1 — Error log buffer (flushed on next successful server contact)
+    _errorBuffer:           [],
+
+    // 5.2 — Startup self-test
+    selfTest: { show: false, scale: 'checking', printer: 'checking', sync: 'checking', errors: {} },
     // v2.3.0 — all-workers report modal
     reportsModal: {
       show: false, loading: false, error: '',
@@ -104,9 +136,8 @@ function weightApp() {
       workerCode: '', workerName: '', selectedDate: '',
     },
 
-    // ── Phase H: shift checklist ──
-    shiftConfirmed:     false,
-    shiftChecks:        { printer: false, scale: false, internet: false },
+    // Shift is auto-computed — no prompt, no checklist
+    shiftConfirmed:     true,
 
     // ── Phase H: data safety indicator (sync health) ──
     syncHealth: 'unknown',   // 'green' | 'yellow' | 'red' | 'unknown'
@@ -161,16 +192,32 @@ function weightApp() {
         if (localStorage.getItem('trainingMode') === '1') this.trainingMode = true;
       } catch (e) { /* ignore */ }
 
-      // Phase H: shift checklist — resets each page-load (sessionStorage)
+      // 5.1 — Install global error handlers + flush any buffered errors
+      var _app = this;
+      window.onerror = function (msg, src, line, col, err) {
+        _app.logError('window', err || { message: msg }, { src: src, line: line, col: col });
+      };
+      window.onunhandledrejection = function (e) {
+        _app.logError('promise', e.reason, {});
+      };
+
+      // 2.1 — Restore audio preference
       try {
-        if (sessionStorage.getItem('shiftConfirmed')) this.shiftConfirmed = true;
-      } catch (e) { /* ignore */ }
+        var storedSound = localStorage.getItem('soundEnabled');
+        if (storedSound !== null) this.soundEnabled = storedSound !== 'false';
+      } catch (e) {}
 
-      // Load feature flags from server (.env → /api/flags)
+      // 2.2 — Restore worker shift counts (reset if shift changed)
+      this._restoreWorkerShiftCounts();
+
+      // 4.3 — Start sync latency 1s ticker
+      this._startSyncLatencyTicker();
+
+      // 5.2 — Startup self-test (runs async, dismisses if all-pass)
+      this._runSelfTest();
+
+      // Load Django URL + token from server for report API calls
       this._loadFlags();
-
-      // H2 — shift auto-confirmed; no shift-gate prompt
-      this.shiftConfirmed = true;
 
       // H3 — clock ticker updates shiftClockLabel every minute
       var self2 = this;
@@ -186,6 +233,7 @@ function weightApp() {
       clearInterval(this._syncStatusPollId);
       clearInterval(this._syncHealthPollId);
       clearInterval(this._readinessMonitorId);
+      clearInterval(this._syncLatencyTimerId);
       clearInterval(this._printerCountdownId);
       clearInterval(this._scaleCountdownId);
       clearTimeout(this._readinessRetryId);
@@ -405,22 +453,7 @@ function weightApp() {
     // Phase H — Shift Start Checklist
     // ══════════════════════════════════════════════════════════════
 
-    get shiftAllChecked() {
-      return this.shiftChecks.printer && this.shiftChecks.scale && this.shiftChecks.internet;
-    },
-
-    confirmShift() {
-      if (!this.shiftAllChecked) return;
-      this.shiftConfirmed = true;
-      try { sessionStorage.setItem('shiftConfirmed', '1'); } catch (e) { /* ignore */ }
-    },
-
-    // Pre-fill checklist from actual hardware status
-    autoFillChecklist() {
-      this.shiftChecks.printer  = this.printerConnected;
-      this.shiftChecks.scale    = this.weightStatus === 'ok';
-      this.shiftChecks.internet = this.syncConnected;
-    },
+    // Shift is automatic — no checklist, no prompt, no confirmShift needed
 
     // ══════════════════════════════════════════════════════════════
     // Phase H — Data Safety Indicator (sync health)
@@ -433,6 +466,8 @@ function weightApp() {
         .then(function (data) {
           var lastSync = data.last_sync_at;
           var pending  = (data.pending_sessions || 0) + (data.pending_entries || 0);
+          if (lastSync) self._lastSyncPushAt = new Date(lastSync).getTime();
+          self.syncPendingCount = pending;   // 1.1 — drive the amber badge
 
           if (!lastSync && pending === 0) {
             // No syncs yet but nothing pending — likely fresh install, OK
@@ -647,6 +682,34 @@ function weightApp() {
 
       if (!this.canPrint) return;
 
+      // 1.2 — Duplicate-print guard: same worker + same product + weight within ±5g within 3s?
+      var weightKg0 = this.stableWeight || this.weight;
+      var weightGm0 = Math.round(weightKg0 * 1000);
+      var sig = { workerCode: this.selectedWorker1, packId: this.selectedPackId, weightGm: weightGm0, ts: now };
+      if (this._lastPrintSignature) {
+        var prev = this._lastPrintSignature;
+        var sameWorker  = prev.workerCode === sig.workerCode;
+        var samePack    = prev.packId     === sig.packId;
+        var sameWeight  = Math.abs(prev.weightGm - sig.weightGm) <= 5;
+        var withinWindow = (now - prev.ts) < 3000;
+        if (sameWorker && samePack && sameWeight && withinWindow) {
+          if (!this._dupGuardModal) {
+            // First duplicate attempt — show warning, auto-dismiss in 5s
+            this._dupGuardModal = true;
+            if (this._dupGuardTimerId) clearTimeout(this._dupGuardTimerId);
+            var self4 = this;
+            this._dupGuardTimerId = setTimeout(function () {
+              self4._dupGuardModal = false;
+              self4._lastPrintSignature = null;
+            }, 5000);
+            return;
+          }
+          // Second tap while guard is active — confirmed duplicate, fall through
+          if (this._dupGuardTimerId) clearTimeout(this._dupGuardTimerId);
+        }
+      }
+      this._dupGuardModal = false;
+
       this.state = 'PRINTING';
       this.errorMessage = null;
       this.errorModal.show = false;
@@ -691,6 +754,19 @@ function weightApp() {
 
         this._updateRecentProducts(Number(this.selectedPackId), bagData.pack_name, weightKg, bagData.bag_number);
         this._updateLocalProductCount(bagData.pack_name);
+
+        // 1.2 — Record print signature for duplicate guard
+        this._lastPrintSignature = { workerCode: this.selectedWorker1, packId: this.selectedPackId, weightGm: weightGm, ts: Date.now() };
+        // Auto-expire signature after 3s so the guard doesn't persist
+        var self3 = this;
+        setTimeout(function () { if (self3._lastPrintSignature && Date.now() - self3._lastPrintSignature.ts >= 3000) self3._lastPrintSignature = null; }, 3100);
+
+        // 2.2 — Increment per-worker shift bag count
+        var wc = this.selectedWorker1;
+        if (wc) {
+          this.workerShiftCounts[wc] = (this.workerShiftCounts[wc] || 0) + 1;
+          this._saveWorkerShiftCounts();
+        }
 
       } catch (err) {
         // Phase F: show full-screen error modal for add-bag failure
@@ -832,7 +908,7 @@ function weightApp() {
     // ══════════════════════════════════════════════════════════════
 
     _playBeep(type) {
-      if (!CONFIG.enableBeep) return;
+      if (!this.soundEnabled) return;
       try {
         var AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
@@ -1053,7 +1129,7 @@ function weightApp() {
         bag_number: bagNumber || null,
         time:       new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
       });
-      this.recentProducts = filtered.slice(0, 10);
+      this.recentProducts = filtered.slice(0, 8);
       try { localStorage.setItem('recent_products', JSON.stringify(this.recentProducts)); } catch (e) { /* ignore */ }
     },
 
@@ -1090,10 +1166,41 @@ function weightApp() {
         .filter(Boolean);
     },
 
-    /** Workers not in the pinned set (shown as small buttons). */
+    /** Workers not in the pinned set (shown in the More modal). */
     get otherWorkerObjects() {
       var pinned = new Set(this.pinnedWorkerCodes);
       return this.workers.filter(function(w) { return !pinned.has(w.worker_code); });
+    },
+
+    /** The most-recently-tapped worker code among the pinned 15 (for MRU indicator). */
+    get mruWorkerCode() {
+      var maxTs = 0;
+      var mru   = '';
+      for (var code of this.pinnedWorkerCodes) {
+        var ts = this.workerLastUsed[code] || 0;
+        if (ts > maxTs) { maxTs = ts; mru = code; }
+      }
+      return mru;
+    },
+
+    /** Always 15 slots; null = empty slot for stable grid layout. */
+    get pinnedSlots() {
+      var objects = this.pinnedWorkerObjects;
+      var slots = [];
+      for (var i = 0; i < 15; i++) {
+        slots.push(objects[i] || null);
+      }
+      return slots;
+    },
+
+    /** CSS class for recent item button based on product MRP price. */
+    recentBtnClass(packId) {
+      var p = this.products.find(function(x) { return x.pack_id === packId; });
+      if (!p || p.mrp === null || p.mrp === undefined) return '';
+      var mrp = Number(p.mrp);
+      if (mrp === 5)  return 'price-5';
+      if (mrp === 10) return 'price-10';
+      return '';
     },
 
     /**
@@ -1120,12 +1227,12 @@ function weightApp() {
       this.workerLastUsed[code] = now;
 
       // Keep position stable: only evict/add when new worker is outside pinned set
+      var wasPromoted = false;
       if (!this.pinnedWorkerCodes.includes(code)) {
+        wasPromoted = true;
         if (this.pinnedWorkerCodes.length < this.PINNED_LIMIT) {
-          // Empty slot available — just append
           this.pinnedWorkerCodes.push(code);
         } else {
-          // Find the pinned worker with the oldest last-used timestamp
           var oldestCode = null;
           var oldestTime = Infinity;
           var self = this;
@@ -1133,10 +1240,17 @@ function weightApp() {
             var t = self.workerLastUsed[c] || 0;
             if (t < oldestTime) { oldestTime = t; oldestCode = c; }
           });
-          // Replace at SAME SLOT so other positions don't shift
           var idx = this.pinnedWorkerCodes.indexOf(oldestCode);
           if (idx >= 0) this.pinnedWorkerCodes[idx] = code;
         }
+      }
+
+      // Brief promotion animation for newly-added worker slots
+      if (wasPromoted) {
+        var self2 = this;
+        if (this._promotedTimerId) clearTimeout(this._promotedTimerId);
+        this._promotedCode = code;
+        this._promotedTimerId = setTimeout(function () { self2._promotedCode = ''; }, 400);
       }
 
       try { localStorage.setItem('pinnedWorkerCodes', JSON.stringify(this.pinnedWorkerCodes)); } catch (e) {}
@@ -1264,11 +1378,15 @@ function weightApp() {
     // ══════════════════════════════════════════════════════════════
 
     async _loadFlags() {
+      // Fetches Django URL + token from server for report API calls.
+      // enableReports flag removed — reports are always enabled.
       try {
         var res  = await fetch('/api/flags');
         var data = await res.json();
-        this.enableReports = !!data.enableReports;
-      } catch (e) { /* default false — safe */ }
+        // Store Django credentials for report calls
+        if (data.djangoServerUrl) this._djangoServerUrl = data.djangoServerUrl;
+        if (data.djangoToken)     this._djangoToken     = data.djangoToken;
+      } catch (e) { /* ok — reports will use sync-service fallback */ }
     },
 
     // ══════════════════════════════════════════════════════════════
@@ -1304,27 +1422,22 @@ function weightApp() {
       var m = this.reportsModal;
       m.loading = true; m.error = '';
       try {
-        // 1. Fetch data from Django
-        var djangoUrl = CONFIG.syncServiceUrl.replace(':5002', ':8000')
-          .replace('localhost', window.location.hostname)
-          .replace('127.0.0.1', window.location.hostname);
-        // Use DJANGO_SERVER_URL if available via flags endpoint (fallback: derive from config)
-        var flagsRes  = await fetch('/api/flags');
-        var flags     = await flagsRes.json();
-        var baseUrl   = flags.djangoServerUrl || CONFIG.syncServiceUrl.replace(':5002', ':8000');
-
+        // Call LOCAL sync-service (item-wise, offline-safe — no Django needed)
         var params = '?date=' + m.selectedDate + '&shift=' + m.selectedShift;
-        var rRes   = await this._fetchWithTimeout(baseUrl + '/api/reports/workers/' + params, {
-          headers: { 'Authorization': 'Token ' + (flags.djangoToken || '') },
-        }, 8000);
+        var rRes = await this._fetchWithTimeout(
+          CONFIG.syncServiceUrl + '/bags/worker-summary' + params,
+          {},
+          8000,
+        );
         if (!rRes.ok) {
-          var err = await rRes.json().catch(function() { return {}; });
-          m.error = err.error || ('Server error ' + rRes.status);
+          var errData = await rRes.json().catch(function() { return {}; });
+          m.error = errData.error || ('Sync service error ' + rRes.status);
           return;
         }
         var report = await rRes.json();
+        report.date  = m.selectedDate;
+        report.shift = m.selectedShift;
 
-        // 2. Send to printer
         var pRes = await this._fetchWithTimeout(
           CONFIG.printServiceUrl + '/print/report-workers',
           { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report) },
@@ -1336,11 +1449,11 @@ function weightApp() {
           return;
         }
         var pr = await pRes.json();
-        this._showPrintToast('Report sent to printer (' + pr.labels_printed + ' labels)');
+        this._showPrintToast('Report printed (' + pr.labels_printed + ' labels)');
         var self = this;
         setTimeout(function () { self.closeReportsModal(); }, 2000);
       } catch (e) {
-        m.error = 'Could not print report — check connection.';
+        m.error = 'Could not print report - check connection.';
       } finally {
         m.loading = false;
       }
@@ -1363,21 +1476,39 @@ function weightApp() {
       var m = this.workerReportModal;
       m.loading = true; m.error = '';
       try {
-        var flagsRes = await fetch('/api/flags');
-        var flags    = await flagsRes.json();
-        var baseUrl  = flags.djangoServerUrl || CONFIG.syncServiceUrl.replace(':5002', ':8000');
-
-        var rRes = await this._fetchWithTimeout(
-          baseUrl + '/api/reports/worker/' + encodeURIComponent(m.workerCode) + '/?date=' + m.selectedDate,
-          { headers: { 'Authorization': 'Token ' + (flags.djangoToken || '') } },
-          8000,
-        );
-        if (!rRes.ok) {
-          var err = await rRes.json().catch(function() { return {}; });
-          m.error = err.error || ('Server error ' + rRes.status);
-          return;
+        // Collect this worker's items across ALL shifts for the selected date
+        // (3 calls to local sync-service — offline-safe, item-wise)
+        var allRows = [];
+        var grandTotal = 0;
+        for (var sh of ['A', 'B', 'C']) {
+          try {
+            var r = await this._fetchWithTimeout(
+              CONFIG.syncServiceUrl + '/bags/worker-summary?date=' + m.selectedDate + '&shift=' + sh,
+              {},
+              5000,
+            );
+            if (r.ok) {
+              var data = await r.json();
+              var wRows = (data.rows || []).filter(function(row) { return row.worker_id === m.workerCode; });
+              var wSub  = (data.worker_subtotals || []).find(function(w) { return w.worker_id === m.workerCode; });
+              // Merge items: if same item appears in multiple shifts, sum them
+              for (var row of wRows) {
+                var existing = allRows.find(function(x) { return x.item === row.item; });
+                if (existing) { existing.bags += row.bags; }
+                else           { allRows.push({ item: row.item, bags: row.bags }); }
+              }
+              if (wSub) grandTotal += wSub.bags;
+            }
+          } catch (e2) { /* skip unreachable shift */ }
         }
-        var report = await rRes.json();
+
+        var report = {
+          date:         m.selectedDate,
+          worker_code:  m.workerCode,
+          worker_name:  m.workerName,
+          rows:         allRows,
+          grand_total:  grandTotal,
+        };
 
         var pRes = await this._fetchWithTimeout(
           CONFIG.printServiceUrl + '/print/report-worker',
@@ -1393,11 +1524,226 @@ function weightApp() {
         var self = this;
         setTimeout(function () { self.closeWorkerReportModal(); }, 2000);
       } catch (e) {
-        m.error = 'Could not print summary — check connection.';
+        m.error = 'Could not print summary - check connection.';
       } finally {
         m.loading = false;
       }
     },
+
+    // ══════════════════════════════════════════════════════════════
+    // 1.1 — Pending sync badge modal (read-only, uses existing /sync/status)
+    // ══════════════════════════════════════════════════════════════
+    openSyncPendingModal() { this.syncPendingModal = true; },
+    closeSyncPendingModal() { this.syncPendingModal = false; },
+
+    // ══════════════════════════════════════════════════════════════
+    // 3.1 — Hardware status modal (in-app overlay, auto-refresh 5s)
+    // ══════════════════════════════════════════════════════════════
+    async openHwModal() {
+      this.hwModal = { show: true, loading: true, data: null };
+      await this._fetchHwStatus();
+      // Start 5s auto-refresh while open
+      var self = this;
+      this._hwRefreshTimerId = setInterval(function () {
+        if (!self.hwModal.show) { clearInterval(self._hwRefreshTimerId); return; }
+        self._fetchHwStatus();
+      }, 5000);
+    },
+
+    closeHwModal() {
+      this.hwModal.show = false;
+      if (this._hwRefreshTimerId) { clearInterval(this._hwRefreshTimerId); this._hwRefreshTimerId = null; }
+    },
+
+    async _fetchHwStatus() {
+      var self = this;
+      try {
+        var [systemRes, syncRes] = await Promise.allSettled([
+          this._fetchWithTimeout(CONFIG.printServiceUrl + '/system/status', {}, 4000),
+          this._fetchWithTimeout(CONFIG.syncServiceUrl + '/sync/status', {}, 4000),
+        ]);
+        var systemData = systemRes.status === 'fulfilled' ? await systemRes.value.json().catch(() => null) : null;
+        var syncData   = syncRes.status   === 'fulfilled' ? await syncRes.value.json().catch(() => null)   : null;
+        var now = new Date();
+        self.hwModal.data = {
+          checkedAt:  now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          scale: {
+            state:        systemData?.scale?.state   ?? 'unknown',
+            port:         systemData?.scale?.port    ?? CONFIG.syncServiceUrl.replace(':5002', ''),
+            simulate:     systemData?.scale?.simulate ?? false,
+          },
+          printer: {
+            state:        systemData?.printer?.state   ?? 'unknown',
+            adapter:      systemData?.printer?.adapter ?? '',
+          },
+          sync: {
+            health:       self.syncHealth,
+            pending:      self.syncPendingCount,
+            lastSyncAt:   syncData?.last_sync_at     ?? null,
+            lastMasterAt: syncData?.last_master_sync_at ?? null,
+            bagsToday:    syncData?.total_bags_today ?? 0,
+            error:        syncData ? null : 'Sync service unreachable',
+          },
+          station: {
+            id:         CONFIG.stationId,
+            build:      (document.documentElement.innerHTML.match(/BUILD_(.+?) -->/) || ['','unknown'])[1],
+            ua:         navigator.userAgent.substring(0, 80),
+            screen:     screen.width + 'x' + screen.height,
+            orientation: window.innerWidth > window.innerHeight ? 'landscape' : 'portrait',
+          },
+        };
+      } catch (e) {
+        if (self.hwModal.show) self.hwModal.data = { error: 'Failed to fetch hardware status: ' + e.message };
+      } finally {
+        self.hwModal.loading = false;
+      }
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // 5.1 — Client error logger
+    // ══════════════════════════════════════════════════════════════
+    logError(source, err, context) {
+      var payload = {
+        stationId: CONFIG.stationId,
+        timestamp: new Date().toISOString(),
+        level:     'error',
+        source:    source,
+        message:   err && err.message ? err.message : String(err),
+        stack:     err && err.stack   ? err.stack   : '',
+        context:   context || {},
+      };
+      var self = this;
+      fetch('/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(function () {
+        // On success: flush any buffered errors
+        if (self._errorBuffer.length > 0) {
+          var buf = self._errorBuffer.splice(0);
+          fetch('/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ batch: buf }) })
+            .catch(() => self._errorBuffer.unshift(...buf));   // re-queue on failure
+        }
+      }).catch(function () {
+        // Buffer locally — flush on next success
+        self._errorBuffer.push(payload);
+        if (self._errorBuffer.length > 50) self._errorBuffer.shift();   // cap at 50
+      });
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // 2.1 — Audio toggle
+    // ══════════════════════════════════════════════════════════════
+    toggleSound() {
+      this.soundEnabled = !this.soundEnabled;
+      try { localStorage.setItem('soundEnabled', String(this.soundEnabled)); } catch (e) {}
+      if (this.soundEnabled) this._playBeep('success');  // confirmation beep
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // 2.2 — Worker shift bag counts
+    // ══════════════════════════════════════════════════════════════
+    // shiftKey format: "YYYY-MM-DD-A/B/C" — robust across reloads and date changes
+    get currentShiftKey() {
+      var h = new Date().getHours();
+      var shift = h >= 6 && h < 14 ? 'A' : h >= 14 && h < 22 ? 'B' : 'C';
+      var d = new Date();
+      if (h < 6) { d.setDate(d.getDate() - 1); }   // Shift C after midnight → yesterday's date
+      return d.toISOString().substring(0, 10) + '-' + shift;
+    },
+
+    _restoreWorkerShiftCounts() {
+      try {
+        var raw = JSON.parse(localStorage.getItem('workerShiftData') || 'null');
+        if (raw && raw.shiftKey === this.currentShiftKey) {
+          this.workerShiftCounts = raw.counts || {};
+        } else {
+          // Shift changed (or fresh install) — start fresh
+          this.workerShiftCounts = {};
+          this._saveWorkerShiftCounts();
+        }
+      } catch (e) { this.workerShiftCounts = {}; }
+    },
+
+    _saveWorkerShiftCounts() {
+      try {
+        localStorage.setItem('workerShiftData', JSON.stringify({
+          shiftKey: this.currentShiftKey,
+          counts:   this.workerShiftCounts,
+        }));
+      } catch (e) {}
+    },
+
+    workerShiftCount(code) {
+      return this.workerShiftCounts[code] || 0;
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // 4.3 — Sync latency ticker (seconds since last successful push)
+    // ══════════════════════════════════════════════════════════════
+    _startSyncLatencyTicker() {
+      var self = this;
+      // Feed last_sync_at from /sync/status into _lastSyncPushAt
+      this._syncLatencyTimerId = setInterval(function () {
+        if (self._lastSyncPushAt) {
+          self._syncLatencySec = Math.floor((Date.now() - self._lastSyncPushAt) / 1000);
+        }
+      }, 1000);
+    },
+
+    get syncLatencyClass() {
+      var s = this._syncLatencySec;
+      if (s === null || s < 5)  return 'latency-green';
+      if (s < 15)               return 'latency-amber';
+      return                           'latency-red';
+    },
+
+    get syncLatencyTooltip() {
+      var s = this._syncLatencySec;
+      return s === null ? 'Sync pending' : s + 's since last sync';
+    },
+
+    // ══════════════════════════════════════════════════════════════
+    // 5.2 — Startup self-test
+    // ══════════════════════════════════════════════════════════════
+    async _runSelfTest() {
+      var self = this;
+      this.selfTest = { show: true, scale: 'checking', printer: 'checking', sync: 'checking', errors: {} };
+
+      // Test scale — does weight service respond?
+      this._fetchWithTimeout(CONFIG.weightServiceUrl + '/health', {}, 3000)
+        .then(function (r) { self.selfTest.scale = r.ok ? 'pass' : 'fail'; })
+        .catch(function () { self.selfTest.scale = 'fail'; self.selfTest.errors.scale = 'Weight service not reachable'; })
+        .finally(function () { self._checkSelfTestDone(); });
+
+      // Test printer — cached health
+      this._fetchWithTimeout(CONFIG.printServiceUrl + '/print/health', {}, 3000)
+        .then(function (r) { return r.json(); })
+        .then(function (d) { self.selfTest.printer = (d.printer && d.printer.connected) ? 'pass' : 'fail'; if (self.selfTest.printer === 'fail') self.selfTest.errors.printer = 'Printer not connected'; })
+        .catch(function () { self.selfTest.printer = 'fail'; self.selfTest.errors.printer = 'Print service not reachable'; })
+        .finally(function () { self._checkSelfTestDone(); });
+
+      // Test sync
+      this._fetchWithTimeout(CONFIG.syncServiceUrl + '/health', {}, 3000)
+        .then(function (r) { self.selfTest.sync = r.ok ? 'pass' : 'fail'; if (!r.ok) self.selfTest.errors.sync = 'Sync service error'; })
+        .catch(function () { self.selfTest.sync = 'fail'; self.selfTest.errors.sync = 'Sync service not reachable'; })
+        .finally(function () { self._checkSelfTestDone(); });
+    },
+
+    _checkSelfTestDone() {
+      var t = this.selfTest;
+      var done = ['pass','fail'].includes(t.scale) && ['pass','fail'].includes(t.printer) && ['pass','fail'].includes(t.sync);
+      if (!done) return;
+      var allPass = t.scale === 'pass' && t.printer === 'pass' && t.sync === 'pass';
+      if (allPass) {
+        // Auto-dismiss after 1 second
+        var self = this;
+        setTimeout(function () { self.selfTest.show = false; }, 1000);
+      }
+      // If any fail: keep visible, operator must tap "Continue"
+    },
+
+    dismissSelfTest() { this.selfTest.show = false; },
 
     _fetchWithTimeout(url, options, timeoutMs) {
       var ms = timeoutMs || CONFIG.fetchTimeoutMs;
