@@ -3,6 +3,7 @@ import { randomUUID, createHash } from 'crypto';
 import { DispatchQueries } from '../../db/queries.js';
 import logger from '../../utils/logger.js';
 import config from '../../config.js';
+import { lookupBagInDjango, type BagLookupResult } from '../../services/djangoBagLookup.js';
 
 const router = Router();
 
@@ -121,7 +122,7 @@ router.get('/docs/:doc_id', (req: Request, res: Response) => {
 });
 
 // ── POST /api/dispatch/docs/:doc_id/scan — validate + add QR ─────────────────
-router.post('/docs/:doc_id/scan', (req: Request, res: Response) => {
+router.post('/docs/:doc_id/scan', async (req: Request, res: Response) => {
   const queries = getQueries(req);
   const doc_id  = String(req.params['doc_id']);
   const { qr_code } = req.body as { qr_code?: string };
@@ -177,13 +178,27 @@ router.post('/docs/:doc_id/scan', (req: Request, res: Response) => {
       return;
     }
 
-    // C / D. Lookup in fg_bag to get bag details
-    const bag    = queries.getBagByQr(qr);
+    // C / D. Lookup bag details — try Django first (sees all stations),
+    //         fall back to local SQLite, then mark as EXTERNAL.
+    //
+    // Flag DISPATCH_USE_DJANGO_LOOKUP=true enables the Django path.
+    // When OFF or when Django is unreachable, behaviour is identical
+    // to the original single-station code.
     const lineId = randomUUID();
     const now    = new Date().toISOString();
 
+    // Step 1: try Django (returns null when flag=off or on any error)
+    const djangoBag = await lookupBagInDjango(qr);
+
+    // Step 2: local SQLite fallback
+    const localBag = djangoBag ? null : queries.getBagByQr(qr);
+
+    // Merge into a single nullable result + track which source won
+    const bag: BagLookupResult | null = djangoBag
+      ?? (localBag ? { ...localBag, lookup_source: 'local' as const } : null);
+
     if (!bag) {
-      // C. Not in local fg_bag → ORANGE, insert as EXTERNAL
+      // C. Not found anywhere → ORANGE / EXTERNAL
       queries.insertScanLine(
         lineId, doc_id, qr,
         null, null, null, null,
@@ -202,19 +217,22 @@ router.post('/docs/:doc_id/scan', (req: Request, res: Response) => {
       return;
     }
 
-    // D. Found in fg_bag → GREEN, insert as LOCAL
+    // D. Found (local or Django) → GREEN
+    // source = 'DJANGO' for cross-station bags, 'LOCAL' for same-station bags
+    const source = bag.lookup_source === 'django' ? 'DJANGO' : 'LOCAL';
+
     queries.insertScanLine(
       lineId, doc_id, qr,
-      bag.bag_id,
+      bag.bag_id,              // null for cross-station (Django) bags — that is correct
       bag.pack_name,
       bag.pack_config_id,
       bag.item_id,
       bag.actual_weight_gm ?? 0,
-      'LOCAL', now,
+      source, now,
     );
 
     logger.info(
-      { doc_id, qr, line_id: lineId, pack_name: bag.pack_name, weight_gm: bag.actual_weight_gm },
+      { doc_id, qr, line_id: lineId, source, pack_name: bag.pack_name, weight_gm: bag.actual_weight_gm },
       'Bag scanned and added to dispatch',
     );
 
@@ -222,9 +240,12 @@ router.post('/docs/:doc_id/scan', (req: Request, res: Response) => {
       ok:      true,
       result:  'SUCCESS',
       color:   'green',
-      message: 'Bag added to dispatch',
+      message: source === 'DJANGO'
+        ? 'Bag verified via Django (cross-station)'
+        : 'Bag added to dispatch',
       qr_code: qr,
       line_id: lineId,
+      source,
       bag: {
         bag_id:           bag.bag_id,
         pack_name:        bag.pack_name,

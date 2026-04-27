@@ -782,7 +782,12 @@ begin
     'WEB_UI_PORT=3000'         + #13#10 + #13#10 +
     '# -- Launcher' + #13#10 +
     'WEIGHT_SERVICE_URL=http://localhost:5000' + #13#10 +
-    'LAUNCHER_HEALTH_PORT=5099' + #13#10;
+    'LAUNCHER_HEALTH_PORT=5099' + #13#10 +
+    '#' + #13#10 +
+    '# -- Multi-station dispatch (v2.2.1)' + #13#10 +
+    '# Set to true once /api/bags/<qr>/ is deployed on Django.' + #13#10 +
+    '# When false (default): dispatch sees only bags from this station.' + #13#10 +
+    'DISPATCH_USE_DJANGO_LOOKUP=false' + #13#10;
 
   // SaveStringToFile writes ANSI (Windows code page). For our ASCII-only
   // .env content, ANSI = UTF-8 (no BOM, no null bytes). This is intentional
