@@ -277,12 +277,14 @@ export interface DispatchLineForPush {
 }
 
 export interface PushDispatchResponse {
-  status:          string;
-  doc_id:          number;
-  doc_no:          string;
-  total_bags:      number;
-  total_weight_gm: number;
-  idempotent?:     boolean;
+  status:           string;
+  dispatch_id:      number;   // live field name (was doc_id)
+  dispatch_no:      string;   // live field name (was doc_no)
+  total_bags:       number;
+  dispatch_status?: string;
+  completed_at?:    string | null;
+  bag_errors?:      unknown[];
+  idempotent?:      boolean;
 }
 
 export interface PartyMaster {

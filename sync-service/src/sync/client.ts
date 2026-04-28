@@ -198,13 +198,12 @@ export class DjangoClient {
   async pushDispatch(data: {
     idempotency_key: string;
     entry_date:      string;
-    truck_no:        string;
+    vehicle_no:      string;   // live field name (truck_no → vehicle_no)
     customer_id:     number | null;
     customer_name:   string;
-    location:        string | null;
     shift:           string | null;
     delay_reason:    string | null;
-    lines:           DispatchLineForPush[];
+    bags:            Array<{ qr_code: string; rate?: number | null }>;  // live format
   }): Promise<PushDispatchResponse> {
     const response = await fetch(`${this.serverUrl}/api/station/push-dispatch/`, {
       method: 'POST',

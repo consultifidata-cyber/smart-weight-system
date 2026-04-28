@@ -696,29 +696,23 @@ export class SyncEngine {
       const resp = await this.client.pushDispatch({
         idempotency_key: doc.idempotency_key ?? doc.doc_id,
         entry_date:      doc.entry_date,
-        truck_no:        doc.truck_no,
+        vehicle_no:      doc.truck_no,          // live uses vehicle_no
         customer_id:     doc.customer_id,
         customer_name:   doc.customer_name,
-        location:        doc.location,
+        // location omitted — live field is FK to TankLocationMaster, never written by station
         shift:           doc.shift_id,
         delay_reason:    doc.delay_reason,
-        lines:           lines.map(l => ({
-          qr_code:          l.qr_code,
-          bag_id:           l.bag_id,
-          pack_name:        l.pack_name,
-          pack_config_id:   l.pack_config_id,
-          item_id:          l.item_id,
-          actual_weight_gm: l.actual_weight_gm,
-          source:           l.source,
-          scanned_at:       l.scanned_at,
-        })),
+        bags:            lines                   // live uses bags[], not lines[]
+          .filter(l => l.qr_code)               // only QR-scanned bags (no EXTERNAL/no-QR)
+          .map(l => ({ qr_code: l.qr_code })),  // live only needs qr_code (+optional rate)
       });
 
-      this.queries.markDispatchDocSynced(doc.doc_id, resp.doc_id, resp.doc_no);
+      // Live response uses dispatch_id / dispatch_no (not doc_id / doc_no)
+      this.queries.markDispatchDocSynced(doc.doc_id, resp.dispatch_id, resp.dispatch_no);
       this.queries.setMeta('last_dispatch_sync_at', new Date().toISOString());
 
       logger.info(
-        { docNo: doc.doc_no, djangoDocId: resp.doc_id, djangoDocNo: resp.doc_no },
+        { docNo: doc.doc_no, djangoDocId: resp.dispatch_id, djangoDocNo: resp.dispatch_no },
         resp.idempotent
           ? '[dispatch-sync] Already on server — marked SYNCED (idempotent)'
           : '[dispatch-sync] Dispatch pushed to Django',
