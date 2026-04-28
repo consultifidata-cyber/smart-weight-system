@@ -69,16 +69,14 @@ async function checkWindowsHealth(printerName: string): Promise<boolean> {
     const s = spoolerOut.trim();
     if (['Offline', 'Error', 'Unknown', 'NotAvailable', ''].includes(s)) return false;
 
-    // Physical USB connectivity check — see tspl.ts healthCheckWin for full comment
-    const physScript =
-      '$f=$false;' +
-      'for($i=1;$i-le9;$i++){' +
-        '$p="\\\\.\\USBPRIN0$i";' +
-        'try{$s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite);$s.Close();$f=$true;break}' +
-        'catch{}}; ' +
-      "if($f){'CONNECTED'}else{'DISCONNECTED'}";
+    // Physical USB presence via PnP (same fix as tspl.ts — USBPRINxx file-open
+    // fails for spooler printers because spooler holds exclusive handle)
+    const pnpScript =
+      '$d=@(Get-PnpDevice -EA SilentlyContinue|' +
+      'Where-Object{$_.Status -eq "OK" -and $_.InstanceId -match "^USBPRINT\\\\"});' +
+      "if($d.Count -gt 0){'CONNECTED'}else{'DISCONNECTED'}";
     const { stdout: physOut } = await execAsync(
-      `powershell -NonInteractive -NoProfile -Command "${physScript}"`,
+      `powershell -NonInteractive -NoProfile -Command "${pnpScript}"`,
       { timeout: 4000 },
     );
     return physOut.trim() === 'CONNECTED';

@@ -259,7 +259,7 @@ html, body {
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-card);
   }
-  .recent-btn { flex: 1; min-height: 0; font-size: clamp(.72rem, 1.4vh, 1rem); }
+  .recent-btn { flex: 1; min-height: 0; font-size: clamp(1.1rem, 2.8vh, 1.9rem); }
 
   /* Weight + product zone */
   .zone-weight {
@@ -320,7 +320,7 @@ html, body {
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-card);
   }
-  .recent-btn { font-size: clamp(.68rem, 1.8vw, .9rem); padding: 5px 4px; }
+  .recent-btn { font-size: clamp(1rem, 2.4vw, 1.6rem); padding: 5px 4px; }
 
   .zone-weight {
     display: flex;
@@ -389,7 +389,7 @@ html, body {
 .recent-btn.price-10.active { background: #fca5a5; border-color: #dc2626; }
 
 .recent-name {
-  font-size: clamp(.72rem, 1.5vh, 1rem);
+  font-size: clamp(1.1rem, 2.8vh, 1.9rem);
   font-weight: 700; line-height: 1.2;
   word-break: break-word; white-space: normal; display: block;
 }

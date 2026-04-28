@@ -235,22 +235,28 @@ export class TSPLDriver implements PrinterDriver {
         return false;
       }
 
-      // Step 2 — Physical USB connectivity check (~200ms).
-      // The Windows print spooler keeps a printer as "Idle" for minutes after
-      // the USB cable is physically removed. But usbprint.sys removes the raw
-      // \\.\USBPRINxx device path IMMEDIATELY on cable pull. Testing file-open
-      // on those paths gives instant disconnect detection without relying on the
-      // spooler's delayed state update.
+      // Step 2 — Physical USB device presence via PnP.
+      //
+      // WHY NOT \\.\USBPRINxx file-open:
+      //   For printers installed through Windows print spooler (WINDOWS mode),
+      //   the spooler holds an exclusive handle to the USB device. Any attempt
+      //   to open \\.\USBPRINxx via File::Open fails with a sharing violation
+      //   even when the cable IS plugged in — so that test always returns
+      //   DISCONNECTED regardless of physical state. Wrong approach.
+      //
+      // CORRECT APPROACH — Get-PnpDevice with InstanceId filter:
+      //   When a USB printer is physically connected, Windows registers a PnP
+      //   device with InstanceId starting with "USBPRINT\". This entry appears
+      //   in Device Manager and disappears immediately when the cable is pulled.
+      //   The spooler's in-memory state (Idle/Normal) is irrelevant here — we
+      //   are checking the USB bus layer directly.
       const t2 = Math.min(5000, Math.floor(timeoutMs * 0.6));
-      const physScript =
-        '$f=$false;' +
-        'for($i=1;$i-le9;$i++){' +
-          '$p="\\\\.\\USBPRIN0$i";' +
-          'try{$s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite);$s.Close();$f=$true;break}' +
-          'catch{}}; ' +
-        "if($f){'CONNECTED'}else{'DISCONNECTED'}";
+      const pnpScript =
+        '$d=@(Get-PnpDevice -EA SilentlyContinue|' +
+        'Where-Object{$_.Status -eq "OK" -and $_.InstanceId -match "^USBPRINT\\\\"});' +
+        "if($d.Count -gt 0){'CONNECTED'}else{'DISCONNECTED'}";
       const { stdout: physOut } = await execAsync(
-        `powershell -NonInteractive -NoProfile -Command "${physScript}"`,
+        `powershell -NonInteractive -NoProfile -Command "${pnpScript}"`,
         { timeout: t2 },
       );
 
