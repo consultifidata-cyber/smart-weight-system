@@ -223,25 +223,27 @@ export class TSPLDriver implements PrinterDriver {
     try {
       const safeN = this.printerName.replace(/'/g, "''");
 
-      // Windows print spooler reliably reflects physical USB state:
-      //   - Cable plugged in, printer ON  → PrinterStatus = Idle / Normal / Ready
-      //   - Cable unplugged               → PrinterStatus = Offline  (within ~5s of disconnect)
-      //   - Printer powered off           → PrinterStatus = Offline / Error
-      //   - Printer not installed at all  → Get-Printer returns null → empty stdout
+      // Two-layer check for physical USB printer connectivity:
       //
-      // We probe every 5s with FAIL_THRESHOLD=1, so disconnect is detected
-      // within one probe cycle of the cable pull.
+      // Layer 1 — Spooler status (fast, catches explicit offline/error/missing)
+      //   Get-Printer tells us if the printer is installed and not in an error state.
+      //   This is fast (~50ms) and reliable for "printer not installed" and "printer error".
       //
-      // Previous approaches that were removed:
-      //   - \\.\USBPRINxx File::Open  → always fails; spooler holds exclusive handle
-      //   - Get-PnpDevice USBPRINT\\  → InstanceId pattern varies by driver/machine;
-      //                                  was returning DISCONNECTED even when connected
+      // Layer 2 — WMI PnP entity (reliable physical USB detection)
+      //   Win32_PnPEntity with PNPDeviceID LIKE 'USBPRINT%' checks the USB device tree
+      //   directly. When the cable is physically pulled, Windows fires a USB disconnect
+      //   event and the WMI entity disappears IMMEDIATELY — unlike Get-Printer which
+      //   can stay as 'Idle' for minutes after cable removal.
+      //   This is the most reliable approach for detecting physical cable disconnect.
       const t = Math.min(timeoutMs, 8000);
       const script =
         `$p=Get-Printer -Name '${safeN}' -EA SilentlyContinue;` +
         `if(-not $p){'DISCONNECTED'}` +
-        `elseif([string]$p.PrinterStatus -in @('Idle','Normal','Ready','Printing')){'CONNECTED'}` +
-        `else{'DISCONNECTED'}`;
+        `elseif([string]$p.PrinterStatus -in @('Offline','Error','Unknown','')){'DISCONNECTED'}` +
+        `else{` +
+          `$w=@(Get-WmiObject -Class Win32_PnPEntity -Filter "PNPDeviceID LIKE 'USBPRINT%'" -EA SilentlyContinue);` +
+          `if($w.Count -gt 0){'CONNECTED'}else{'DISCONNECTED'}` +
+        `}`;
       const { stdout } = await execAsync(
         `powershell -NonInteractive -NoProfile -Command "${script}"`,
         { timeout: t },

@@ -69,15 +69,18 @@ async function checkWindowsHealth(printerName: string): Promise<boolean> {
     const s = spoolerOut.trim();
     if (['Offline', 'Error', 'Unknown', 'NotAvailable', ''].includes(s)) return false;
 
-    // Same logic as tspl.ts healthCheckWin — spooler reflects USB state reliably
+    // Same two-layer logic as tspl.ts healthCheckWin
     const script =
       `$p=Get-Printer -Name '${safeN}' -EA SilentlyContinue;` +
       `if(-not $p){'DISCONNECTED'}` +
-      `elseif([string]$p.PrinterStatus -in @('Idle','Normal','Ready','Printing')){'CONNECTED'}` +
-      `else{'DISCONNECTED'}`;
+      `elseif([string]$p.PrinterStatus -in @('Offline','Error','Unknown','')){'DISCONNECTED'}` +
+      `else{` +
+        `$w=@(Get-WmiObject -Class Win32_PnPEntity -Filter "PNPDeviceID LIKE 'USBPRINT%'" -EA SilentlyContinue);` +
+        `if($w.Count -gt 0){'CONNECTED'}else{'DISCONNECTED'}` +
+      `}`;
     const { stdout } = await execAsync(
       `powershell -NonInteractive -NoProfile -Command "${script}"`,
-      { timeout: 4000 },
+      { timeout: 6000 },
     );
     return stdout.trim() === 'CONNECTED';
   } catch {
