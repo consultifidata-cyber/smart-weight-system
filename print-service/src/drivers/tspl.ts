@@ -241,7 +241,8 @@ export class TSPLDriver implements PrinterDriver {
         `if(-not $p){'DISCONNECTED'}` +
         `elseif([string]$p.PrinterStatus -in @('Offline','Error','Unknown','')){'DISCONNECTED'}` +
         `else{` +
-          `$w=(Get-WmiObject Win32_PnPEntity -Filter ""PNPDeviceID LIKE 'USBPRINT%'"" -EA SilentlyContinue | Select-Object -First 1);` +
+          `$f='PNPDeviceID LIKE ''USBPRINT%''';` +
+          `$w=(Get-WmiObject Win32_PnPEntity -Filter $f -EA SilentlyContinue | Select-Object -First 1);` +
           `if($w){'CONNECTED'}else{'DISCONNECTED'}` +
         `}`;
       const { stdout } = await execAsync(
