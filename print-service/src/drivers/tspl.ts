@@ -223,44 +223,30 @@ export class TSPLDriver implements PrinterDriver {
     try {
       const safeN = this.printerName.replace(/'/g, "''");
 
-      // Step 1 — Quick spooler check (~100ms).
-      // Catches explicit offline/error states the spooler already knows about.
-      const t1 = Math.min(3000, Math.floor(timeoutMs * 0.3));
-      const { stdout: spoolerOut } = await execAsync(
-        `powershell -NonInteractive -NoProfile -Command "(Get-Printer -Name '${safeN}').PrinterStatus"`,
-        { timeout: t1 },
-      );
-      const spoolerStatus = spoolerOut.trim();
-      if (['Offline', 'Error', 'Unknown', 'NotAvailable', ''].includes(spoolerStatus)) {
-        return false;
-      }
-
-      // Step 2 — Physical USB device presence via PnP.
+      // Windows print spooler reliably reflects physical USB state:
+      //   - Cable plugged in, printer ON  → PrinterStatus = Idle / Normal / Ready
+      //   - Cable unplugged               → PrinterStatus = Offline  (within ~5s of disconnect)
+      //   - Printer powered off           → PrinterStatus = Offline / Error
+      //   - Printer not installed at all  → Get-Printer returns null → empty stdout
       //
-      // WHY NOT \\.\USBPRINxx file-open:
-      //   For printers installed through Windows print spooler (WINDOWS mode),
-      //   the spooler holds an exclusive handle to the USB device. Any attempt
-      //   to open \\.\USBPRINxx via File::Open fails with a sharing violation
-      //   even when the cable IS plugged in — so that test always returns
-      //   DISCONNECTED regardless of physical state. Wrong approach.
+      // We probe every 5s with FAIL_THRESHOLD=1, so disconnect is detected
+      // within one probe cycle of the cable pull.
       //
-      // CORRECT APPROACH — Get-PnpDevice with InstanceId filter:
-      //   When a USB printer is physically connected, Windows registers a PnP
-      //   device with InstanceId starting with "USBPRINT\". This entry appears
-      //   in Device Manager and disappears immediately when the cable is pulled.
-      //   The spooler's in-memory state (Idle/Normal) is irrelevant here — we
-      //   are checking the USB bus layer directly.
-      const t2 = Math.min(5000, Math.floor(timeoutMs * 0.6));
-      const pnpScript =
-        '$d=@(Get-PnpDevice -EA SilentlyContinue|' +
-        'Where-Object{$_.Status -eq "OK" -and $_.InstanceId -match "^USBPRINT\\\\"});' +
-        "if($d.Count -gt 0){'CONNECTED'}else{'DISCONNECTED'}";
-      const { stdout: physOut } = await execAsync(
-        `powershell -NonInteractive -NoProfile -Command "${pnpScript}"`,
-        { timeout: t2 },
+      // Previous approaches that were removed:
+      //   - \\.\USBPRINxx File::Open  → always fails; spooler holds exclusive handle
+      //   - Get-PnpDevice USBPRINT\\  → InstanceId pattern varies by driver/machine;
+      //                                  was returning DISCONNECTED even when connected
+      const t = Math.min(timeoutMs, 8000);
+      const script =
+        `$p=Get-Printer -Name '${safeN}' -EA SilentlyContinue;` +
+        `if(-not $p){'DISCONNECTED'}` +
+        `elseif([string]$p.PrinterStatus -in @('Idle','Normal','Ready','Printing')){'CONNECTED'}` +
+        `else{'DISCONNECTED'}`;
+      const { stdout } = await execAsync(
+        `powershell -NonInteractive -NoProfile -Command "${script}"`,
+        { timeout: t },
       );
-
-      return physOut.trim() === 'CONNECTED';
+      return stdout.trim() === 'CONNECTED';
     } catch {
       return false;
     }
