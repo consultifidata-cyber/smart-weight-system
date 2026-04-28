@@ -711,8 +711,21 @@ export class SyncEngine {
       this.queries.markDispatchDocSynced(doc.doc_id, resp.dispatch_id, resp.dispatch_no);
       this.queries.setMeta('last_dispatch_sync_at', new Date().toISOString());
 
+      // bag_errors: list of strings for QRs that Django skipped.
+      //   "QR not found: <QR>"       — bag never synced to Django (sync_service hasn't pushed it yet)
+      //   "Already dispatched: <QR>" — QR is in another active dispatch
+      // The dispatch header is STILL CREATED and COMPLETED for bags that succeeded.
+      // bag_errors is omitted entirely (not []) when all bags landed.
+      const bagErrors: string[] = resp.bag_errors ?? [];
+      if (bagErrors.length > 0) {
+        logger.warn(
+          { docNo: doc.doc_no, bagErrors, totalLanded: resp.total_bags },
+          '[dispatch-sync] Dispatch synced with bag errors — some QRs were skipped by Django',
+        );
+      }
+
       logger.info(
-        { docNo: doc.doc_no, djangoDocId: resp.dispatch_id, djangoDocNo: resp.dispatch_no },
+        { docNo: doc.doc_no, djangoDocId: resp.dispatch_id, djangoDocNo: resp.dispatch_no, bagErrors: bagErrors.length },
         resp.idempotent
           ? '[dispatch-sync] Already on server — marked SYNCED (idempotent)'
           : '[dispatch-sync] Dispatch pushed to Django',
@@ -739,10 +752,7 @@ export class SyncEngine {
     }
   }
 
-  // ── Party master pull (Phase DE — BLOCKED pending Django endpoint) ─────
-  // GET /api/station/party-masters/ does NOT exist on Django yet.
-  // Add that endpoint (Phase DD-bis), then call this from pullMasterData()
-  // using Promise.allSettled alongside fetchPackConfigs / fetchWorkerMasters.
+  // ── Party master pull — confirmed live on GET /api/station/party-masters/ ──
   async pullPartyMasters(): Promise<number> {
     if (!this.client.isConfigured) return 0;
 

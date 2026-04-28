@@ -283,7 +283,7 @@ export interface PushDispatchResponse {
   total_bags:       number;
   dispatch_status?: string;
   completed_at?:    string | null;
-  bag_errors?:      unknown[];
+  bag_errors?:      string[];
   idempotent?:      boolean;
 }
 
