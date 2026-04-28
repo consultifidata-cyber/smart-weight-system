@@ -75,8 +75,8 @@ async function checkWindowsHealth(printerName: string): Promise<boolean> {
       `if(-not $p){'DISCONNECTED'}` +
       `elseif([string]$p.PrinterStatus -in @('Offline','Error','Unknown','')){'DISCONNECTED'}` +
       `else{` +
-        `$w=@(Get-WmiObject -Class Win32_PnPEntity -Filter "PNPDeviceID LIKE 'USBPRINT%'" -EA SilentlyContinue);` +
-        `if($w.Count -gt 0){'CONNECTED'}else{'DISCONNECTED'}` +
+        `$w=(Get-WmiObject Win32_PnPEntity -Filter "PNPDeviceID LIKE 'USBPRINT%'" -EA SilentlyContinue | Select-Object -First 1);` +
+        `if($w){'CONNECTED'}else{'DISCONNECTED'}` +
       `}`;
     const { stdout } = await execAsync(
       `powershell -NonInteractive -NoProfile -Command "${script}"`,

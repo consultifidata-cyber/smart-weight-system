@@ -23,9 +23,9 @@
 import type { PrinterDriver } from '../types.js';
 import logger from '../utils/logger.js';
 
-const PROBE_INTERVAL_MS = 5_000;    // probe every 5 s — detect disconnect within 5-9 s
-const FAIL_THRESHOLD    = 1;         // single failure = immediate disconnect (no hysteresis)
-const PROBE_TIMEOUT_MS  = 4_000;    // must be < PROBE_INTERVAL_MS so probes don't pile up
+const PROBE_INTERVAL_MS = 10_000;   // probe every 10 s
+const FAIL_THRESHOLD    = 1;         // single failure = immediate disconnect
+const PROBE_TIMEOUT_MS  = 8_000;    // generous timeout — WMI query can take 3-5s under SYSTEM
 
 let _healthy          = true;        // optimistic: don't block first request
 let _consecutiveFails = 0;

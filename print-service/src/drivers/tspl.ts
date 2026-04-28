@@ -235,14 +235,14 @@ export class TSPLDriver implements PrinterDriver {
       //   event and the WMI entity disappears IMMEDIATELY — unlike Get-Printer which
       //   can stay as 'Idle' for minutes after cable removal.
       //   This is the most reliable approach for detecting physical cable disconnect.
-      const t = Math.min(timeoutMs, 8000);
+      const t = Math.min(timeoutMs, 9000);
       const script =
         `$p=Get-Printer -Name '${safeN}' -EA SilentlyContinue;` +
         `if(-not $p){'DISCONNECTED'}` +
         `elseif([string]$p.PrinterStatus -in @('Offline','Error','Unknown','')){'DISCONNECTED'}` +
         `else{` +
-          `$w=@(Get-WmiObject -Class Win32_PnPEntity -Filter "PNPDeviceID LIKE 'USBPRINT%'" -EA SilentlyContinue);` +
-          `if($w.Count -gt 0){'CONNECTED'}else{'DISCONNECTED'}` +
+          `$w=(Get-WmiObject Win32_PnPEntity -Filter "PNPDeviceID LIKE 'USBPRINT%'" -EA SilentlyContinue | Select-Object -First 1);` +
+          `if($w){'CONNECTED'}else{'DISCONNECTED'}` +
         `}`;
       const { stdout } = await execAsync(
         `powershell -NonInteractive -NoProfile -Command "${script}"`,
