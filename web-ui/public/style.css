@@ -259,7 +259,12 @@ html, body {
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-card);
   }
-  .recent-btn { flex: 1; min-height: 0; font-size: clamp(1.1rem, 2.8vh, 1.9rem); }
+  .recent-btn {
+    flex: 1; min-height: 0;
+    font-size: clamp(1.3rem, 3.5vh, 2.4rem);
+    display: flex; align-items: center; justify-content: center;
+    text-align: center;
+  }
 
   /* Weight + product zone */
   .zone-weight {
@@ -383,15 +388,17 @@ html, body {
 .recent-btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* Price-based color coding */
-.recent-btn.price-5  { background: #d1fae5; border-color: #10b981; color: #065f46; }
-.recent-btn.price-10 { background: #fee2e2; border-color: #ef4444; color: #991b1b; }
-.recent-btn.price-5.active  { background: #6ee7b7; border-color: #059669; }
-.recent-btn.price-10.active { background: #fca5a5; border-color: #dc2626; }
+/* Price indicator: neutral background, only the name text gets color */
+.recent-btn.price-5  { background: var(--bg-card); border-color: #e2e8f0; }
+.recent-btn.price-10 { background: var(--bg-card); border-color: #e2e8f0; }
+.recent-btn.price-5  .recent-name { color: #15803d; }
+.recent-btn.price-10 .recent-name { color: #dc2626; }
 
 .recent-name {
-  font-size: clamp(1.1rem, 2.8vh, 1.9rem);
-  font-weight: 700; line-height: 1.2;
+  font-size: clamp(1.3rem, 3.5vh, 2.4rem);
+  font-weight: 800; line-height: 1.15;
   word-break: break-word; white-space: normal; display: block;
+  text-align: center;
 }
 .recent-empty { font-size: .8rem; color: var(--muted); text-align: center; padding: 8px 4px; }
 
