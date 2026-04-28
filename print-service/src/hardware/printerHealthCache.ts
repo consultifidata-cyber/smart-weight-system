@@ -24,8 +24,8 @@ import type { PrinterDriver } from '../types.js';
 import logger from '../utils/logger.js';
 
 const PROBE_INTERVAL_MS = 10_000;   // probe every 10 s
-const FAIL_THRESHOLD    = 1;         // single failure = immediate disconnect
-const PROBE_TIMEOUT_MS  = 8_000;    // generous timeout — WMI query can take 3-5s under SYSTEM
+const FAIL_THRESHOLD    = 2;         // two consecutive failures → disconnect (tolerates one slow probe)
+const PROBE_TIMEOUT_MS  = 12_000;   // Get-PnpDevice cold start under SYSTEM can take up to 10s
 
 let _healthy          = true;        // optimistic: don't block first request
 let _consecutiveFails = 0;

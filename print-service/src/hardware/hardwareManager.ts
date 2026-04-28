@@ -16,6 +16,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { tmpdir } from 'os';
 import config from '../config.js';
 import { detectPrinters, clearDetectionCache as clearPrinterCache } from './printerDetect.js';
 import logger from '../utils/logger.js';
@@ -57,35 +58,33 @@ async function fetchJson<T>(url: string, timeoutMs = 3000): Promise<T> {
 }
 
 // ── Windows printer health check (WINDOWS mode only) ─────────────────────────
+// Uses the same .ps1 file approach as tspl.ts healthCheckWin — see that method
+// for full rationale.  Single consolidated call: no two-step sequential PS calls.
 
 async function checkWindowsHealth(printerName: string): Promise<boolean> {
   if (process.platform !== 'win32') return false;
+  const fs = await import('fs').then(m => m.promises);
+  const tempFile = join(tmpdir(), `sws_hc_${Date.now()}_${process.pid}.ps1`);
   try {
     const safeN = printerName.replace(/'/g, "''");
-    const { stdout: spoolerOut } = await execAsync(
-      `powershell -NonInteractive -NoProfile -Command "(Get-Printer -Name '${safeN}').PrinterStatus"`,
-      { timeout: 3000 },
-    );
-    const s = spoolerOut.trim();
-    if (['Offline', 'Error', 'Unknown', 'NotAvailable', ''].includes(s)) return false;
-
-    // Same two-layer logic as tspl.ts healthCheckWin
-    const script =
-      `$p=Get-Printer -Name '${safeN}' -EA SilentlyContinue;` +
-      `if(-not $p){'DISCONNECTED'}` +
-      `elseif([string]$p.PrinterStatus -in @('Offline','Error','Unknown','')){'DISCONNECTED'}` +
-      `else{` +
-        `$f='PNPDeviceID LIKE ''USBPRINT%''';` +
-        `$w=(Get-WmiObject Win32_PnPEntity -Filter $f -EA SilentlyContinue | Select-Object -First 1);` +
-        `if($w){'CONNECTED'}else{'DISCONNECTED'}` +
-      `}`;
+    const psContent =
+      `$ErrorActionPreference = 'SilentlyContinue'\r\n` +
+      `$p = Get-Printer -Name '${safeN}' -EA SilentlyContinue\r\n` +
+      `if (-not $p) { 'DISCONNECTED'; exit }\r\n` +
+      `$d = Get-PnpDevice -PresentOnly |\r\n` +
+      `     Where-Object { $_.InstanceId -like 'USBPRINT*' -and $_.Status -eq 'OK' } |\r\n` +
+      `     Select-Object -First 1\r\n` +
+      `if ($d) { 'CONNECTED' } else { 'DISCONNECTED' }\r\n`;
+    await fs.writeFile(tempFile, psContent, 'utf8');
     const { stdout } = await execAsync(
-      `powershell -NonInteractive -NoProfile -Command "${script}"`,
-      { timeout: 6000 },
+      `powershell -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "${tempFile}"`,
+      { timeout: 10_000 },
     );
     return stdout.trim() === 'CONNECTED';
   } catch {
     return false;
+  } finally {
+    await fs.unlink(tempFile).catch(() => {});
   }
 }
 

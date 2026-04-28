@@ -216,42 +216,43 @@ export class TSPLDriver implements PrinterDriver {
   }
 
   /**
-   * Health check for Windows: query printer status via PowerShell Get-Printer.
-   * Uses the full Windows printer name (e.g. "SNBC TVSE LP 46 NEO BPLE").
+   * Health check for Windows using a temp .ps1 file (no inline -Command escaping).
+   *
+   * Two-gate check written to a temp file and executed with -File:
+   *   Gate 1 — Get-Printer: printer must be registered in the spooler.
+   *   Gate 2 — Get-PnpDevice -PresentOnly: USB device must be physically present
+   *             right now.  -PresentOnly excludes ghost/phantom devices that
+   *             Win32_PnPEntity returns even after the cable is pulled.
+   *             Status -eq 'OK' excludes present-but-errored devices.
+   *
+   * Using a .ps1 file instead of -Command "..." eliminates all cmd.exe
+   * quote-escaping issues that caused previous versions to always return
+   * DISCONNECTED or CONNECTED regardless of physical state.
    */
   async healthCheckWin(timeoutMs: number = 10_000): Promise<boolean> {
+    const fs = await import('fs').then(m => m.promises);
+    const tempFile = join(tmpdir(), `sws_hc_${Date.now()}_${process.pid}.ps1`);
     try {
       const safeN = this.printerName.replace(/'/g, "''");
-
-      // Two-layer check for physical USB printer connectivity:
-      //
-      // Layer 1 — Spooler status (fast, catches explicit offline/error/missing)
-      //   Get-Printer tells us if the printer is installed and not in an error state.
-      //   This is fast (~50ms) and reliable for "printer not installed" and "printer error".
-      //
-      // Layer 2 — WMI PnP entity (reliable physical USB detection)
-      //   Win32_PnPEntity with PNPDeviceID LIKE 'USBPRINT%' checks the USB device tree
-      //   directly. When the cable is physically pulled, Windows fires a USB disconnect
-      //   event and the WMI entity disappears IMMEDIATELY — unlike Get-Printer which
-      //   can stay as 'Idle' for minutes after cable removal.
-      //   This is the most reliable approach for detecting physical cable disconnect.
-      const t = Math.min(timeoutMs, 9000);
-      const script =
-        `$p=Get-Printer -Name '${safeN}' -EA SilentlyContinue;` +
-        `if(-not $p){'DISCONNECTED'}` +
-        `elseif([string]$p.PrinterStatus -in @('Offline','Error','Unknown','')){'DISCONNECTED'}` +
-        `else{` +
-          `$f='PNPDeviceID LIKE ''USBPRINT%''';` +
-          `$w=(Get-WmiObject Win32_PnPEntity -Filter $f -EA SilentlyContinue | Select-Object -First 1);` +
-          `if($w){'CONNECTED'}else{'DISCONNECTED'}` +
-        `}`;
+      const psContent =
+        `$ErrorActionPreference = 'SilentlyContinue'\r\n` +
+        `$p = Get-Printer -Name '${safeN}' -EA SilentlyContinue\r\n` +
+        `if (-not $p) { 'DISCONNECTED'; exit }\r\n` +
+        `$d = Get-PnpDevice -PresentOnly |\r\n` +
+        `     Where-Object { $_.InstanceId -like 'USBPRINT*' -and $_.Status -eq 'OK' } |\r\n` +
+        `     Select-Object -First 1\r\n` +
+        `if ($d) { 'CONNECTED' } else { 'DISCONNECTED' }\r\n`;
+      await fs.writeFile(tempFile, psContent, 'utf8');
+      const t = Math.min(timeoutMs, 11_000);
       const { stdout } = await execAsync(
-        `powershell -NonInteractive -NoProfile -Command "${script}"`,
+        `powershell -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "${tempFile}"`,
         { timeout: t },
       );
       return stdout.trim() === 'CONNECTED';
     } catch {
       return false;
+    } finally {
+      await fs.unlink(tempFile).catch(() => {});
     }
   }
 
