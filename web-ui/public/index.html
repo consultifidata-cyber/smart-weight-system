@@ -19,7 +19,7 @@
 
         <!-- Header -->
         <div class="wsm-header">
-          <span class="wsm-title">📊 Worker Summary</span>
+          <span class="wsm-title">Worker Summary — <span x-text="wsModal.date"></span></span>
           <button class="wsm-close" @click="closeWorkerSummaryModal()">✕</button>
         </div>
 
@@ -32,23 +32,12 @@
               :max="new Date().toISOString().substring(0,10)"
               @change="onWsParamChange()">
           </div>
-          <div class="wsm-field">
-            <label class="wsm-label">Shift</label>
-            <div class="wsm-shift-radios">
-              <template x-for="s in ['A','B','C']" :key="s">
-                <label class="wsm-shift-lbl" :class="{ active: wsModal.shift === s }">
-                  <input type="radio" :value="s" x-model="wsModal.shift" @change="onWsParamChange()" style="display:none">
-                  <span x-text="s"></span>
-                </label>
-              </template>
-            </div>
-          </div>
           <button class="wsm-load-btn"
             :disabled="wsModal.loading"
             @click="loadWorkerSummaryPreview()">
             <span x-show="wsModal.loading">Loading…</span>
-            <span x-show="!wsModal.loading && !wsModal.stale">Load Preview</span>
-            <span x-show="!wsModal.loading && wsModal.stale">⚠ Reload Preview</span>
+            <span x-show="!wsModal.loading && !wsModal.stale">Load Summary</span>
+            <span x-show="!wsModal.loading && wsModal.stale">⚠ Reload</span>
           </button>
         </div>
 
@@ -61,7 +50,7 @@
           <!-- Empty -->
           <div class="wsm-empty-msg"
             x-show="!wsModal.loading && !wsModal.error && wsModal.data && wsModal.data.rows.length === 0">
-            No bags recorded for Shift <span x-text="wsModal.shift"></span> on <span x-text="wsModal.date"></span>.
+            No bags recorded on <span x-text="wsModal.date"></span>.
           </div>
 
           <!-- Table -->
@@ -70,7 +59,8 @@
               <span>Worker</span><span>Name</span><span>Item</span><span>Bags</span>
             </div>
             <template x-for="(r, idx) in wsDisplayRows" :key="idx">
-              <div :class="r.type === 'subtotal' ? 'wsm-subtotal-row' : 'wsm-data-row'">
+              <div :class="r.type === 'subtotal' ? 'wsm-subtotal-row' : r.type === 'shift-header' ? 'wsm-shift-header' : 'wsm-data-row'">
+                <span x-show="r.type === 'shift-header'" class="wsm-shift-label" x-text="r.label"></span>
                 <span x-show="r.type === 'row'"    x-text="r.worker_id"></span>
                 <span x-show="r.type === 'row'"    x-text="r.worker_name"></span>
                 <span x-show="r.type === 'row'"    x-text="r.item"></span>
@@ -87,21 +77,21 @@
           <!-- Placeholder before first load -->
           <div class="wsm-empty-msg"
             x-show="!wsModal.loading && !wsModal.error && !wsModal.data">
-            Select date &amp; shift, then tap Load Preview.
+            Select a date, then tap Load Summary.
           </div>
 
         </div><!-- /.wsm-preview -->
 
         <!-- Actions -->
         <div class="wsm-actions">
-          <button class="wsm-cancel-btn" @click="closeWorkerSummaryModal()">Cancel</button>
+          <button class="wsm-cancel-btn" @click="closeWorkerSummaryModal()">Close</button>
           <button class="wsm-print-btn"
             :disabled="!wsModal.data || wsModal.data.rows.length === 0 || wsModal.stale || wsModal.printing"
             :class="{ 'wsm-print-done': wsModal.printDone }"
             @click="printWorkerSummary()">
             <span x-show="wsModal.printing">Printing…</span>
             <span x-show="wsModal.printDone && !wsModal.printing">✓ Printed!</span>
-            <span x-show="!wsModal.printing && !wsModal.printDone">🖨 Print</span>
+            <span x-show="!wsModal.printing && !wsModal.printDone">🖨 Print Summary</span>
           </button>
         </div>
 
@@ -433,7 +423,7 @@
           <!-- 4.3 sync latency dot -->
           <span class="sync-latency-dot" :class="syncLatencyClass" :title="syncLatencyTooltip"></span>
         </div>
-        <button class="sbar-reports-btn" @click="openReportsModal()" title="Print worker report">📊</button>
+        <button class="sbar-reports-btn" @click="openWorkerSummaryModal()" title="Worker summary">Summary</button>
         <div class="sbar-shift-clock" x-text="shiftClockLabel"></div>
       </div>
 

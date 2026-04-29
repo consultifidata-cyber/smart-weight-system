@@ -1019,7 +1019,11 @@ function weightApp() {
 
     get weightStatusText() {
       if (this.weightStatus === 'ok') return 'Scale OK';
-      if (this.weightServiceReachable && this.weightStatus === 'disconnected') return 'Scale Connecting';
+      if (this.weightServiceReachable && this.weightStatus === 'disconnected') {
+        if (this.scaleCountdown !== null) return 'DISCONNECTED · ' + this.scaleCountdown + 's';
+        return 'Scale Connecting';
+      }
+      if (this.scaleCountdown !== null) return 'Scale OFF · ' + this.scaleCountdown + 's';
       return 'Scale OFF';
     },
 
@@ -1262,25 +1266,40 @@ function weightApp() {
     // Worker Productivity Summary modal
     // ══════════════════════════════════════════════════════════════════════
 
-    // Flat list for the preview table: mixes 'row' and 'subtotal' entries
+    // Flat list for the preview table: mixes 'shift-header', 'row' and 'subtotal' entries
     // so the template needs only a single x-for loop.
     get wsDisplayRows() {
       var m = this.wsModal;
       if (!m.data || !m.data.rows || m.data.rows.length === 0) return [];
-      var subtotalMap = {};
-      (m.data.worker_subtotals || []).forEach(function (w) { subtotalMap[w.worker_id] = w.bags; });
+
+      // Data is grouped by shift (from all-shifts fetch)
+      var shifts = m.data._shifts || [{ shift: m.data.shift || 'ALL', rows: m.data.rows, worker_subtotals: m.data.worker_subtotals || [] }];
       var result = [];
-      var prev = null;
-      m.data.rows.forEach(function (row, i) {
-        if (prev !== null && row.worker_id !== prev) {
-          result.push({ type: 'subtotal', label: 'Subtotal', bags: subtotalMap[prev] || 0 });
+
+      shifts.forEach(function (shiftBlock) {
+        if (shiftBlock.rows.length === 0) return;
+
+        // Shift header (only when multiple shifts)
+        if (shifts.length > 1) {
+          var shiftTimes = { A: '06:00–13:59', B: '14:00–21:59', C: '22:00–05:59' };
+          result.push({ type: 'shift-header', label: 'Shift ' + shiftBlock.shift + '  (' + (shiftTimes[shiftBlock.shift] || '') + ')' });
         }
-        result.push({ type: 'row', worker_id: row.worker_id, worker_name: row.worker_name, item: row.item, bags: row.bags });
-        prev = row.worker_id;
-        if (i === m.data.rows.length - 1) {
-          result.push({ type: 'subtotal', label: 'Subtotal', bags: subtotalMap[row.worker_id] || 0 });
-        }
+
+        var subtotalMap = {};
+        (shiftBlock.worker_subtotals || []).forEach(function (w) { subtotalMap[w.worker_id] = w.bags; });
+        var prev = null;
+        shiftBlock.rows.forEach(function (row, i) {
+          if (prev !== null && row.worker_id !== prev) {
+            result.push({ type: 'subtotal', label: 'Subtotal', bags: subtotalMap[prev] || 0 });
+          }
+          result.push({ type: 'row', worker_id: row.worker_id, worker_name: row.worker_name, item: row.item, bags: row.bags });
+          prev = row.worker_id;
+          if (i === shiftBlock.rows.length - 1) {
+            result.push({ type: 'subtotal', label: 'Subtotal', bags: subtotalMap[row.worker_id] || 0 });
+          }
+        });
       });
+
       return result;
     },
 
@@ -1291,9 +1310,8 @@ function weightApp() {
     },
 
     openWorkerSummaryModal() {
-      var now   = new Date();
-      var h     = now.getHours();
-      var shift = this._wsShiftForHour(h);
+      var now = new Date();
+      var h   = now.getHours();
       var d;
       // Shift C after midnight (00:00–05:59): shift started yesterday
       if (h < 6) {
@@ -1303,7 +1321,10 @@ function weightApp() {
       } else {
         d = now.toISOString().substring(0, 10);
       }
-      this.wsModal = { show: true, date: d, shift: shift, loading: false, data: null, error: '', stale: false, printing: false, printDone: false };
+      this.wsModal = { show: true, date: d, shift: 'ALL', loading: false, data: null, error: '', stale: false, printing: false, printDone: false };
+      // Auto-load on open
+      var self = this;
+      setTimeout(function () { self.loadWorkerSummaryPreview(); }, 50);
     },
 
     closeWorkerSummaryModal() {
@@ -1317,14 +1338,40 @@ function weightApp() {
       m.data    = null;
       m.stale   = false;
       try {
-        var url = CONFIG.syncServiceUrl + '/bags/worker-summary?date=' + m.date + '&shift=' + m.shift;
-        var res = await this._fetchWithTimeout(url, {}, 8000);
-        var json = await res.json();
-        if (!res.ok) {
-          m.error = json.error || ('Server error ' + res.status);
-        } else {
-          m.data = json;
-        }
+        // Fetch all 3 shifts in parallel and merge
+        var baseUrl = CONFIG.syncServiceUrl + '/bags/worker-summary?date=' + m.date + '&shift=';
+        var results = await Promise.all([
+          this._fetchWithTimeout(baseUrl + 'A', {}, 8000).then(function (r) { return r.json(); }),
+          this._fetchWithTimeout(baseUrl + 'B', {}, 8000).then(function (r) { return r.json(); }),
+          this._fetchWithTimeout(baseUrl + 'C', {}, 8000).then(function (r) { return r.json(); }),
+        ]);
+
+        // Merge all shifts into a single data structure
+        var allRows = [];
+        var grandTotal = 0;
+        var shiftBlocks = [];
+
+        ['A', 'B', 'C'].forEach(function (s, i) {
+          var data = results[i];
+          if (data.rows && data.rows.length > 0) {
+            shiftBlocks.push({
+              shift: s,
+              rows: data.rows,
+              worker_subtotals: data.worker_subtotals || [],
+            });
+            allRows = allRows.concat(data.rows);
+            grandTotal += (data.grand_total || 0);
+          }
+        });
+
+        m.data = {
+          rows: allRows,
+          grand_total: grandTotal,
+          worker_subtotals: [],  // subtotals are per-shift in _shifts
+          _shifts: shiftBlocks,
+          date: m.date,
+          shift: 'ALL',
+        };
       } catch (e) {
         m.error = 'Could not reach sync service - is it running?';
       } finally {
@@ -1333,7 +1380,7 @@ function weightApp() {
     },
 
     onWsParamChange() {
-      // Clear preview when date/shift changes after a successful load
+      // Clear preview when date changes after a successful load
       if (this.wsModal.data) { this.wsModal.stale = true; }
     },
 
@@ -1344,27 +1391,45 @@ function weightApp() {
       m.printing  = true;
       m.printDone = false;
 
-      // Dry-run: uncomment next line to log TSPL payload without sending
-      // console.log('[worker-summary] payload:', JSON.stringify(m.data, null, 2)); return;
-
       var self = this;
       try {
+        // Print the full-day report via the report-workers endpoint
+        var report = {
+          date: m.date,
+          shift: 'ALL',
+          rows: m.data.rows,
+          grand_total: m.data.grand_total,
+          worker_subtotals: [],
+          station: CONFIG.stationId,
+        };
+
+        // Rebuild flat worker_subtotals for the printer
+        var subMap = {};
+        m.data.rows.forEach(function (r) {
+          subMap[r.worker_id] = (subMap[r.worker_id] || 0) + r.bags;
+        });
+        report.worker_subtotals = Object.keys(subMap).map(function (id) {
+          return { worker_id: id, bags: subMap[id] };
+        });
+
         var res = await this._fetchWithTimeout(
-          CONFIG.printServiceUrl + '/print/worker-summary',
+          CONFIG.printServiceUrl + '/print/report-workers',
           {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(m.data),
+            body:    JSON.stringify(report),
           },
-          15000,   // label strip can be long — allow more time than a bag label
+          30000,
         );
 
         if (res.ok) {
+          var pr = await res.json().catch(function () { return {}; });
           m.printDone = true;
+          self._showPrintToast('Summary printed' + (pr.labels_printed ? ' (' + pr.labels_printed + ' labels)' : ''));
           setTimeout(function () { self.closeWorkerSummaryModal(); }, 1500);
         } else {
           var errJson = await res.json().catch(function () { return {}; });
-          self._showErrorModal('PRINT FAILED', errJson.error || 'Printer returned an error.', false);
+          self._showErrorModal('PRINT FAILED', errJson.error || errJson.message || 'Printer returned an error.', false);
         }
       } catch (e) {
         self._showErrorModal('PRINT FAILED', 'Could not reach print service - is it running?', false);

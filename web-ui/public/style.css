@@ -388,9 +388,8 @@ html, body {
 .recent-btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* Price-based color coding */
-/* Price indicator: neutral background, only the name text gets color */
-.recent-btn.price-5  { background: var(--bg-card); border-color: #e2e8f0; }
-.recent-btn.price-10 { background: var(--bg-card); border-color: #e2e8f0; }
+.recent-btn.price-5  { background: #eff6ff; border-color: #bfdbfe; }
+.recent-btn.price-10 { background: #fefce8; border-color: #fde68a; }
 .recent-btn.price-5  .recent-name { color: #15803d; }
 .recent-btn.price-10 .recent-name { color: #dc2626; }
 
@@ -505,12 +504,12 @@ html, body {
 }
 
 .wpin-code {
-  font-size: clamp(.9rem, 2vh, 1.3rem);
+  font-size: clamp(1.3rem, 3vh, 2rem);
   font-weight: 900; color: var(--text);
   font-variant-numeric: tabular-nums; line-height: 1;
 }
 .wpin-name {
-  font-size: clamp(.6rem, 1.2vh, .75rem);
+  font-size: clamp(.7rem, 1.4vh, .85rem);
   color: var(--muted); font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 90%;
@@ -776,6 +775,12 @@ html, body {
   font-size: .78rem; color: var(--muted); border-bottom: 1px dashed #cbd5e1;
   margin-bottom: 4px;
 }
+.wsm-shift-header {
+  padding: 10px 0 4px; font-weight: 800; font-size: .85rem;
+  color: var(--blue); border-bottom: 2px solid var(--blue);
+  margin-top: 6px;
+}
+.wsm-shift-label { grid-column: 1 / -1; }
 .wsm-grand-row {
   display: grid; grid-template-columns: 1fr 3rem;
   padding: 8px 0 4px; font-weight: 900; font-size: .9rem;
@@ -872,7 +877,7 @@ html, body { overflow: hidden; height: 100vh; width: 100vw; }
 
 /* H3 — shift + clock display in status bar */
 .sbar-shift-clock {
-  font-size: .75rem; font-weight: 800; color: var(--blue);
+  font-size: clamp(.95rem, 2vh, 1.3rem); font-weight: 800; color: var(--blue);
   white-space: nowrap; padding: 0 6px;
   align-self: center;
 }
@@ -884,11 +889,13 @@ html, body { overflow: hidden; height: 100vh; width: 100vw; }
 
 /* Top-bar reports button */
 .sbar-reports-btn {
-  background: transparent; border: 1px solid rgba(255,255,255,.3);
-  border-radius: 6px; padding: 2px 8px; cursor: pointer;
-  font-size: .9rem; color: white; align-self: center;
+  background: #eff6ff; border: 2px solid var(--blue);
+  border-radius: 8px; padding: 4px 10px; cursor: pointer;
+  font-size: .82rem; font-weight: 700; color: var(--blue); align-self: center;
+  white-space: nowrap;
 }
-.sbar-reports-btn:hover { background: rgba(255,255,255,.1); }
+.sbar-reports-btn:hover { background: #dbeafe; }
+.sbar-reports-btn:active { opacity: .8; }
 
 /* Worker tile wrapper + report icon overlay */
 .wpin-wrapper { position: relative; display: inline-block; }
